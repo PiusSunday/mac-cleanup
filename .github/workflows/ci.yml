@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  shellcheck:
+    name: ShellCheck Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: './lib'
+          additional_files: 'bin/mac-cleanup install.sh tests/smoke_test.sh'
+
+  bats-tests:
+    name: Bats Unit Tests
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Bats
+        run: brew install bats-core
+      - name: Run tests
+        run: bats tests/test_utils.bats tests/test_xcode.bats tests/test_docker.bats
+
+  smoke-test:
+    name: Smoke Test
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make executable
+        run: chmod +x bin/mac-cleanup
+      - name: Run smoke test
+        run: bash tests/smoke_test.sh

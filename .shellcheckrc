@@ -1,0 +1,4 @@
+# Disable warnings that are acceptable in this context
+disable=SC1091   # Can't follow sourced files
+disable=SC2034   # Variables used by other scripts
+shell=bash

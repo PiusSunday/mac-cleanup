@@ -1,0 +1,10 @@
+.DS_Store
+*.swp
+*.swo
+~/.mac-cleanup/cleanup.log
+
+docs/*.md
+
+node_modules/
+package.json
+package-lock.json
