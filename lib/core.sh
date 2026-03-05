@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# lib/core.sh — Global state: DRY_RUN, VERBOSE, SKIP_CONFIRM flags
+# Sourced first by bin/mac-cleanup; never modified after initial parse.
+
+export DRY_RUN=${DRY_RUN:-true}
+export VERBOSE=${VERBOSE:-false}
+export SKIP_CONFIRM=${SKIP_CONFIRM:-false}
+export LOG_FILE=${LOG_FILE:-"$HOME/.mac-cleanup/cleanup.log"}
+export VERSION="0.2.0"
+
+# Cleanup targets (default: all false, set by CLI flags)
+export TARGET_SYSTEM=false
+export TARGET_XCODE=false
+export TARGET_DOCKER=false
+export TARGET_DEVTOOLS=false
+export TARGET_SNAPSHOTS=false
+export TARGET_CACHES=false
+export TARGET_BREW=false
+
+# Tracking — accumulate bytes freed across modules
+export TOTAL_FREED=0
+
+# Per-module reporting arrays
+# Each module registers: name, category, scanned bytes, freed bytes, status
+declare -a MODULE_NAMES=()
+declare -a MODULE_CATEGORIES=()
+declare -a MODULE_SCANNED=()
+declare -a MODULE_FREED=()
+declare -a MODULE_STATUS=()

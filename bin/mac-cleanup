@@ -1,0 +1,330 @@
+#!/usr/bin/env bash
+# bin/mac-cleanup — Entry point: flag parsing, orchestration, and final report
+set -euo pipefail
+
+# ── Resolve lib directory ─────────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="${SCRIPT_DIR}/../lib"
+
+# ── Source core and utilities first ──────────────────────────────────────────
+# shellcheck source=../lib/core.sh
+source "${LIB_DIR}/core.sh"
+# shellcheck source=../lib/utils.sh
+source "${LIB_DIR}/utils.sh"
+
+# ── Source all modules ────────────────────────────────────────────────────────
+# shellcheck source=../lib/system.sh
+source "${LIB_DIR}/system.sh"
+# shellcheck source=../lib/xcode.sh
+source "${LIB_DIR}/xcode.sh"
+# shellcheck source=../lib/docker.sh
+source "${LIB_DIR}/docker.sh"
+# shellcheck source=../lib/devtools.sh
+source "${LIB_DIR}/devtools.sh"
+# shellcheck source=../lib/snapshots.sh
+source "${LIB_DIR}/snapshots.sh"
+# shellcheck source=../lib/caches.sh
+source "${LIB_DIR}/caches.sh"
+# shellcheck source=../lib/brew.sh
+source "${LIB_DIR}/brew.sh"
+
+# ── Help output ───────────────────────────────────────────────────────────────
+show_help() {
+  cat <<EOF
+
+${BOLD}mac-cleanup v${VERSION}${RESET} — macOS Developer Storage Cleanup
+
+${BOLD}USAGE:${RESET}
+  mac-cleanup [targets] [options]
+
+${BOLD}TARGETS:${RESET}
+  --system, -S       Scan crash reports, .DS_Store, Trash, dev caches
+  --xcode, -x        Clean Xcode DerivedData, Archives, DeviceSupport
+  --docker, -d       Clean Docker containers, images, volumes, build cache
+  --devtools, -D     Clean orphaned node_modules, Rust targets, __pycache__, Gradle
+  --snapshots, -s    Delete local Time Machine snapshots
+  --caches, -c       Clear ~/Library/Caches and app caches
+  --brew, -b         Run brew cleanup and autoremove
+  --all, -a          Run all cleanup targets
+
+${BOLD}OPTIONS:${RESET}
+  --dry-run, -n      Preview what would be deleted (DEFAULT — no files removed)
+  --yes, -y          Skip confirmation prompts
+  --verbose, -v      Show detailed logs
+  --help, -h         Show this help
+
+${BOLD}EXAMPLES:${RESET}
+  mac-cleanup --all --dry-run       Preview all cleanups (safe to run anytime)
+  mac-cleanup --xcode --docker      Clean Xcode + Docker (will ask to confirm)
+  mac-cleanup --system              Scan system artifacts only
+  mac-cleanup --devtools            Find orphaned build artifacts
+  mac-cleanup --all --yes           Clean everything, no prompts
+
+${YELLOW}${WARN}  By default, mac-cleanup runs in DRY-RUN mode and will NOT delete anything.${RESET}
+   Pass --all without --dry-run to perform actual cleanup.
+
+EOF
+}
+
+# ── Flag parsing ──────────────────────────────────────────────────────────────
+parse_flags() {
+  if [[ $# -eq 0 ]]; then
+    DRY_RUN=true
+    TARGET_SYSTEM=true
+    TARGET_XCODE=true
+    TARGET_DOCKER=true
+    TARGET_DEVTOOLS=true
+    TARGET_SNAPSHOTS=true
+    TARGET_CACHES=true
+    TARGET_BREW=true
+    log::warn "No flags provided. Running --all --dry-run by default."
+    return
+  fi
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --system|-S)
+        TARGET_SYSTEM=true
+        ;;
+      --xcode|-x)
+        TARGET_XCODE=true
+        ;;
+      --docker|-d)
+        TARGET_DOCKER=true
+        ;;
+      --devtools|-D)
+        TARGET_DEVTOOLS=true
+        ;;
+      --snapshots|-s)
+        TARGET_SNAPSHOTS=true
+        ;;
+      --caches|-c)
+        TARGET_CACHES=true
+        ;;
+      --brew|-b)
+        TARGET_BREW=true
+        ;;
+      --all|-a)
+        TARGET_SYSTEM=true
+        TARGET_XCODE=true
+        TARGET_DOCKER=true
+        TARGET_DEVTOOLS=true
+        TARGET_SNAPSHOTS=true
+        TARGET_CACHES=true
+        TARGET_BREW=true
+        ;;
+      --dry-run|-n)
+        DRY_RUN=true
+        ;;
+      --yes|-y)
+        SKIP_CONFIRM=true
+        ;;
+      --verbose|-v)
+        VERBOSE=true
+        ;;
+      --help|-h)
+        show_help
+        exit 0
+        ;;
+      *)
+        log::error "Unknown option: $1"
+        show_help
+        exit 1
+        ;;
+    esac
+    shift
+  done
+}
+
+# ── Print upgraded summary report ─────────────────────────────────────────────
+print_report() {
+  local total_freed_bytes="$1"
+  local duration="$2"
+  local disk_before="$3"
+  local disk_after="$4"
+
+  local total_freed_fmt
+  total_freed_fmt=$(utils::format_bytes "$total_freed_bytes")
+
+  local mode_label="LIVE"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    mode_label="DRY-RUN"
+  fi
+
+  local bar
+  bar=$(printf '━%.0s' $(seq 1 53))
+
+  # ── Header ──
+  printf '\n%s%s%s%s\n' "${BOLD}" "${BLUE}" "$bar" "${RESET}"
+  printf '%s  🧹 mac-cleanup — Summary Report%s\n' "${BOLD}" "${RESET}"
+  printf '%s%s%s%s\n' "${BOLD}" "${BLUE}" "$bar" "${RESET}"
+  printf '  Mode: %s%s%s  |  Duration: %ss\n\n' \
+    "${CYAN}" "$mode_label" "${RESET}" "$duration"
+
+  # ── Column headers ──
+  local separator
+  separator=$(printf '─%.0s' $(seq 1 50))
+  printf '  %s%-18s %-13s %-10s %s%s\n' \
+    "${BOLD}" "Category" "Module" "Scanned" "Status${RESET}" ""
+  printf '  %s\n' "$separator"
+
+  # ── Per-module rows ──
+  local total_scanned=0
+  local total_freed_calc=0
+  local module_count=${#MODULE_NAMES[@]}
+
+  if (( module_count == 0 )); then
+    printf '  %s(no modules ran)%s\n' "${DIM}" "${RESET}"
+  else
+    local prev_category=""
+    for (( i=0; i<module_count; i++ )); do
+      local name="${MODULE_NAMES[$i]}"
+      local category="${MODULE_CATEGORIES[$i]}"
+      local scanned="${MODULE_SCANNED[$i]}"
+      local freed="${MODULE_FREED[$i]}"
+      local status="${MODULE_STATUS[$i]}"
+
+      total_scanned=$(( total_scanned + scanned ))
+      total_freed_calc=$(( total_freed_calc + freed ))
+
+      # Format scanned
+      local scanned_fmt
+      if (( scanned == 0 )); then
+        scanned_fmt="—"
+      else
+        scanned_fmt=$(utils::format_bytes "$scanned")
+      fi
+
+      # Format status
+      local status_fmt
+      case "$status" in
+        clean)   status_fmt="${GREEN}✔ Clean${RESET}" ;;
+        skipped) status_fmt="${YELLOW}⚠ Skipped${RESET}" ;;
+        review)  status_fmt="${CYAN}💡 Review${RESET}" ;;
+        *)
+          # Numeric = reclaimable bytes
+          if [[ "$status" =~ ^[0-9]+$ ]] && (( status > 0 )); then
+            status_fmt="${GREEN}🗑 $(utils::format_bytes "$status")${RESET}"
+          else
+            status_fmt="${GREEN}✔ Clean${RESET}"
+          fi
+          ;;
+      esac
+
+      # Show category only on first row of each category group
+      local cat_display=""
+      if [[ "$category" != "$prev_category" ]]; then
+        cat_display="$category"
+        prev_category="$category"
+      fi
+
+      printf '  %-18s %-13s %-10s %s\n' "$cat_display" "$name" "$scanned_fmt" "$status_fmt"
+    done
+  fi
+
+  # ── Total row ──
+  printf '  %s\n' "$separator"
+
+  local total_scanned_fmt
+  total_scanned_fmt=$(utils::format_bytes "$total_scanned")
+
+  local total_status
+  if (( total_freed_bytes > 0 )); then
+    total_status="${GREEN}🗑 ${total_freed_fmt}${RESET}"
+  else
+    total_status="${GREEN}✔ Clean${RESET}"
+  fi
+
+  printf '  %s%-18s %-13s %-10s%s %s\n' \
+    "${BOLD}" "TOTAL" "" "$total_scanned_fmt" "${RESET}" "$total_status"
+
+  # ── Footer ──
+  printf '\n'
+  local free_before_fmt free_after_fmt
+  free_before_fmt=$(utils::format_bytes "$disk_before")
+  free_after_fmt=$(utils::format_bytes "$disk_after")
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    # Project what free space would be after cleanup
+    local projected=$(( disk_before + total_freed_calc ))
+    local projected_fmt
+    projected_fmt=$(utils::format_bytes "$projected")
+    printf '  Free space:  %s → %s (projected)\n' "$free_before_fmt" "$projected_fmt"
+  else
+    printf '  Free space:  %s → %s\n' "$free_before_fmt" "$free_after_fmt"
+  fi
+
+  printf '  Log saved:   %s\n' "$LOG_FILE"
+  printf '%s%s%s%s\n\n' "${BOLD}" "${BLUE}" "$bar" "${RESET}"
+
+  log::success "Run complete. Total freed: ${total_freed_fmt} (${mode_label})"
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+main() {
+  parse_flags "$@"
+
+  utils::check_macos
+
+  # Capture start time for duration tracking
+  local start_time
+  start_time=$(date +%s)
+
+  # Show system context header (replaces old bare version line)
+  utils::print_system_context
+
+  # Require confirmation unless --yes is set or running dry-run
+  if [[ "$DRY_RUN" != "true" ]]; then
+    utils::confirm "This will delete files from your system. Continue?" || {
+      log::info "Aborted by user."
+      exit 0
+    }
+  fi
+
+  # Snapshot free space before
+  local disk_before
+  disk_before=$(utils::get_free_bytes)
+
+  # ── System (always runs first) ──
+  log::category "System"
+  system::clean
+
+  # ── Developer Tools ──
+  if [[ "$TARGET_XCODE" == "true" ]] || [[ "$TARGET_DOCKER" == "true" ]] || [[ "$TARGET_DEVTOOLS" == "true" ]]; then
+    log::category "Developer Tools"
+    [[ "$TARGET_XCODE" == "true" ]]    && xcode::clean
+    [[ "$TARGET_DOCKER" == "true" ]]   && docker::clean
+    [[ "$TARGET_DEVTOOLS" == "true" ]] && devtools::clean
+  fi
+
+  # ── Caches & Logs ──
+  if [[ "$TARGET_CACHES" == "true" ]] || [[ "$TARGET_BREW" == "true" ]]; then
+    log::category "Caches & Logs"
+    [[ "$TARGET_CACHES" == "true" ]] && caches::clean
+    [[ "$TARGET_BREW" == "true" ]]   && brew::clean
+  fi
+
+  # ── Storage Management ──
+  if [[ "$TARGET_SNAPSHOTS" == "true" ]]; then
+    log::category "Storage Management"
+    snapshots::clean
+  fi
+
+  # Snapshot free space after
+  local disk_after
+  disk_after=$(utils::get_free_bytes)
+  local freed=$(( disk_after - disk_before ))
+  # Ensure non-negative (dry-run won't free anything)
+  if (( freed < 0 )); then
+    freed=0
+  fi
+
+  # Calculate duration
+  local end_time
+  end_time=$(date +%s)
+  local duration=$(( end_time - start_time ))
+
+  print_report "$freed" "$duration" "$disk_before" "$disk_after"
+}
+
+main "$@"
