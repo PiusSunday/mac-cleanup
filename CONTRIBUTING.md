@@ -4,7 +4,7 @@ Thank you for your interest in contributing! This project welcomes bug reports, 
 
 ## Branching Model
 
-```
+```text
 main       ← stable releases only (protected)
   └── develop   ← integration branch (PRs go here)
         ├── feature/your-feature

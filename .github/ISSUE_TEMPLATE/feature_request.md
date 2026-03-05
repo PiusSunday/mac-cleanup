@@ -22,7 +22,7 @@ Any alternative solutions or workarounds you've thought of.
 
 If applicable, list the specific directories/files you'd like cleaned:
 
-```
+```bash
 ~/path/to/target
 ~/another/path
 ```
