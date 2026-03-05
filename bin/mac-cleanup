@@ -48,6 +48,8 @@ ${BOLD}TARGETS:${RESET}
   --all, -a          Run all cleanup targets
 
 ${BOLD}OPTIONS:${RESET}
+  --live, -L         Perform actual cleanup (DELETE files)
+  --no-dry-run       Alias for --live
   --dry-run, -n      Preview what would be deleted (DEFAULT — no files removed)
   --yes, -y          Skip confirmation prompts
   --verbose, -v      Show detailed logs
@@ -61,7 +63,7 @@ ${BOLD}EXAMPLES:${RESET}
   mac-cleanup --all --yes           Clean everything, no prompts
 
 ${YELLOW}${WARN}  By default, mac-cleanup runs in DRY-RUN mode and will NOT delete anything.${RESET}
-   Pass --all without --dry-run to perform actual cleanup.
+   Pass --live to perform actual cleanup.
 
 EOF
 }
@@ -115,6 +117,9 @@ parse_flags() {
         ;;
       --dry-run|-n)
         DRY_RUN=true
+        ;;
+      --live|-L|--no-dry-run)
+        DRY_RUN=false
         ;;
       --yes|-y)
         SKIP_CONFIRM=true
@@ -270,11 +275,13 @@ main() {
   local start_time
   start_time=$(date +%s)
 
-  # Show system context header (replaces old bare version line)
+  # Show system context header
   utils::print_system_context
 
-  # Require confirmation unless --yes is set or running dry-run
+  # Live mode: show warning banner and require confirmation
   if [[ "$DRY_RUN" != "true" ]]; then
+    printf '\n  %s%s  ⚠  LIVE MODE — files will be permanently deleted%s\n\n' \
+      "${BOLD}" "${RED}" "${RESET}"
     utils::confirm "This will delete files from your system. Continue?" || {
       log::info "Aborted by user."
       exit 0

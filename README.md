@@ -107,15 +107,18 @@ mac-cleanup --system
 # Find orphaned build artifacts
 mac-cleanup --devtools
 
-# Preview everything without prompts
-mac-cleanup --all --yes
+# Actually clean everything (will prompt for confirmation)
+mac-cleanup --all --live
+
+# Actually clean everything, skip prompts
+mac-cleanup --all --live --yes
 
 # Show help
 mac-cleanup --help
 ```
 
 > **Note:** mac-cleanup runs in DRY-RUN mode by default and will NOT delete anything.
-> At present, mac-cleanup supports preview/dry-run mode only; there is no live deletion mode.
+> Pass `--live` to perform actual cleanup. You will be prompted for confirmation unless `--yes` is also passed.
 
 ### Expected output
 
@@ -174,20 +177,22 @@ mac-cleanup --help
 
 ## Flag Reference
 
-| Flag          | Short | Default  | Description                                       |
-| ------------- | ----- | -------- | ------------------------------------------------- |
-| `--system`    | `-S`  | false    | Scan crash reports, .DS_Store, Trash, dev caches  |
-| `--xcode`     | `-x`  | false    | Clean Xcode artifacts                             |
-| `--docker`    | `-d`  | false    | Clean Docker resources                            |
-| `--devtools`  | `-D`  | false    | Clean orphaned node_modules, Rust, Python, Gradle |
-| `--snapshots` | `-s`  | false    | Remove local Time Machine snapshots               |
-| `--caches`    | `-c`  | false    | Clear user/system caches                          |
-| `--brew`      | `-b`  | false    | Run Homebrew cleanup                              |
-| `--all`       | `-a`  | false    | Run all of the above                              |
-| `--dry-run`   | `-n`  | **true** | Preview only — no deletions                       |
-| `--yes`       | `-y`  | false    | Skip confirmation prompts                         |
-| `--verbose`   | `-v`  | false    | Show detailed output                              |
-| `--help`      | `-h`  | —        | Show help message                                 |
+| Flag           | Short | Default  | Description                                       |
+| -------------- | ----- | -------- | ------------------------------------------------- |
+| `--system`     | `-S`  | false    | Scan crash reports, .DS_Store, Trash, dev caches  |
+| `--xcode`      | `-x`  | false    | Clean Xcode artifacts                             |
+| `--docker`     | `-d`  | false    | Clean Docker resources                            |
+| `--devtools`   | `-D`  | false    | Clean orphaned node_modules, Rust, Python, Gradle |
+| `--snapshots`  | `-s`  | false    | Remove local Time Machine snapshots               |
+| `--caches`     | `-c`  | false    | Clear user/system caches                          |
+| `--brew`       | `-b`  | false    | Run Homebrew cleanup                              |
+| `--all`        | `-a`  | false    | Run all of the above                              |
+| `--live`       | `-L`  | false    | Perform actual cleanup (DELETE files)             |
+| `--no-dry-run` |       | false    | Alias for `--live`                                |
+| `--dry-run`    | `-n`  | **true** | Preview only — no deletions                       |
+| `--yes`        | `-y`  | false    | Skip confirmation prompts                         |
+| `--verbose`    | `-v`  | false    | Show detailed output                              |
+| `--help`       | `-h`  | —        | Show help message                                 |
 
 > **Note:** The system module always runs first regardless of which flags are selected.
 
@@ -196,6 +201,8 @@ mac-cleanup --help
 ## Safety
 
 ⚠️ **By default, mac-cleanup runs in DRY-RUN mode and will NOT delete anything.**
+
+To perform actual cleanup, pass `--live`. A prominent warning banner will appear, and you will be prompted for confirmation unless `--yes` is also passed.
 
 ### What it will NEVER touch
 

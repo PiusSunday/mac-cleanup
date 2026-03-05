@@ -57,4 +57,13 @@ else
   exit 1
 fi
 
+echo "Testing --help contains --live flag..."
+output=$("$BIN" --help 2>&1)
+if echo "$output" | grep -q "\-\-live"; then
+  echo "✔ --help documents --live flag"
+else
+  echo "✘ --help missing --live flag"
+  exit 1
+fi
+
 echo "All smoke tests passed."
