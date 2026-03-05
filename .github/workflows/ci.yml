@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 jobs:
   shellcheck:
@@ -17,8 +17,8 @@ jobs:
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@2.0.0
         with:
-          scandir: './lib'
-          additional_files: 'bin/mac-cleanup install.sh tests/smoke_test.sh'
+          scandir: "./lib"
+          additional_files: "bin/mac-cleanup install.sh tests/smoke_test.sh"
 
   bats-tests:
     name: Bats Unit Tests
@@ -30,7 +30,7 @@ jobs:
       - name: Install Bats
         run: brew install bats-core
       - name: Run tests
-        run: bats tests/test_utils.bats tests/test_xcode.bats tests/test_docker.bats
+        run: bats tests/
 
   smoke-test:
     name: Smoke Test
