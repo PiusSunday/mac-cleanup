@@ -118,18 +118,31 @@ system::_ds_store() {
 
   local count=0
   local total_bytes=0
+  local skipped=0
   while IFS= read -r file; do
     local fbytes
     fbytes=$(utils::get_size_bytes "$file")
     total_bytes=$(( total_bytes + fbytes ))
     (( count++ )) || true
-    dry_run_or_exec rm -f "$file"
+    if [[ "$DRY_RUN" == "true" ]]; then
+      log::info "[DRY-RUN] Would execute: rm -f ${file}"
+    else
+      if ! rm -f "$file" 2>/dev/null; then
+        log::verbose "  Skipped (permission denied): $file"
+        (( skipped++ )) || true
+      fi
+    fi
   done < <(find "$HOME" -maxdepth 4 -name ".DS_Store" -type f 2>/dev/null || true)
 
   _SYS_DSSTORE_TOTAL=$total_bytes
 
   if (( count > 0 )); then
-    log::info ".DS_Store: ${count} files ($(utils::format_bytes "$total_bytes"))"
+    local msg
+    msg=".DS_Store: ${count} files ($(utils::format_bytes "$total_bytes"))"
+    if (( skipped > 0 )); then
+      msg="${msg} — ${skipped} skipped (protected by macOS)"
+    fi
+    log::info "$msg"
   else
     log::info ".DS_Store: none found."
   fi
