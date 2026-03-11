@@ -212,9 +212,6 @@ utils::with_spinner() {
     fi
   }
 
-  # Ensure temporary file is removed when this function returns.
-  trap 'rm -f "$stderr_file"' RETURN
-
   "$@" > /dev/null 2>"$stderr_file" &
   local pid=$!
   utils::spinner "$pid" "$msg"
@@ -227,12 +224,14 @@ utils::with_spinner() {
   fi
 
   if (( exit_code == 0 )); then
+    rm -f "$stderr_file"
     log::success "$msg"
     return 0
   else
     if [[ -s "$stderr_file" ]]; then
       cat "$stderr_file" >&2
     fi
+    rm -f "$stderr_file"
     log::error "$msg (command failed with exit code ${exit_code})"
     return "$exit_code"
   fi
