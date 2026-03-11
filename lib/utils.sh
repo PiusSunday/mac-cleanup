@@ -122,7 +122,10 @@ dry_run_or_exec() {
     return 0
   fi
   log::verbose "Executing: ${pretty_cmd}"
-  "$@"
+  if ! "$@" 2>/dev/null; then
+    log::verbose "  ⚠ Permission denied: ${pretty_cmd}"
+    return 0
+  fi
 }
 
 # ── Confirmation prompt ───────────────────────────────────────────────────────
@@ -212,9 +215,6 @@ utils::with_spinner() {
     fi
   }
 
-  # Ensure temporary file is removed when this function returns.
-  trap 'rm -f "$stderr_file"' RETURN
-
   "$@" > /dev/null 2>"$stderr_file" &
   local pid=$!
   utils::spinner "$pid" "$msg"
@@ -227,12 +227,14 @@ utils::with_spinner() {
   fi
 
   if (( exit_code == 0 )); then
+    rm -f "$stderr_file"
     log::success "$msg"
     return 0
   else
     if [[ -s "$stderr_file" ]]; then
       cat "$stderr_file" >&2
     fi
+    rm -f "$stderr_file"
     log::error "$msg (command failed with exit code ${exit_code})"
     return "$exit_code"
   fi
@@ -289,7 +291,7 @@ utils::print_system_context() {
   macos_ver=$(sw_vers -productVersion 2>/dev/null || echo "unknown")
 
   local free_space
-  free_space=$(df -h / | awk 'NR==2 {print $4}')
+  free_space=$(utils::format_bytes "$(utils::get_free_bytes)")
 
   local user_mode="User mode"
   if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then

@@ -57,4 +57,21 @@ else
   exit 1
 fi
 
+echo "Testing --help does NOT contain --live flag (removed)..."
+output=$("$BIN" --help 2>&1)
+if echo "$output" | grep -q "\-\-live"; then
+  echo "✘ --help still mentions --live (should be removed)"
+  exit 1
+else
+  echo "✔ --live correctly removed from --help"
+fi
+
+echo "Testing --help documents --yes flag..."
+if echo "$output" | grep -q "\-\-yes"; then
+  echo "✔ --help documents --yes flag"
+else
+  echo "✘ --help missing --yes flag"
+  exit 1
+fi
+
 echo "All smoke tests passed."

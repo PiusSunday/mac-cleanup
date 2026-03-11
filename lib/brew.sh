@@ -22,13 +22,7 @@ brew::clean() {
 
   if [[ "$DRY_RUN" == "true" ]]; then
     log::info "[DRY-RUN] Would run: brew cleanup --prune=all"
-    brew cleanup -n 2>&1 | while IFS= read -r line; do
-      log::info "  ${line}"
-    done
     log::info "[DRY-RUN] Would run: brew autoremove"
-    brew autoremove -n 2>&1 | while IFS= read -r line; do
-      log::info "  ${line}"
-    done
   else
     utils::with_spinner "Running brew cleanup --prune=all..." brew cleanup --prune=all
     utils::with_spinner "Running brew autoremove..." brew autoremove

@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-03-11
+
+### Added
+
+- Flutter/Dart build cache detection (`build/`, `.dart_tool/`, `~/.pub-cache`) in devtools module
+- npm `_npx` cache and `_logs` scanning in system module
+- Zsh completion cache (`.zcompdump*`) scanning in caches module
+- Spotify cache (`com.spotify.client`) scanning in caches module
+- JetBrains IDE cache cleanup (Caches, Logs, Application Support) in caches module
+- BATS tests for `system.sh` (9 tests) and `devtools.sh` (10 tests) — total: 51 tests
+
+### Fixed
+
+- Homebrew `brew cleanup -n` / `brew autoremove -n` no longer run during dry-run mode
+- Summary TOTAL status, footer free space, and "Run complete" line all derive from the same value
+- Header and footer free space now consistently display in GB (was showing GiB in header)
+- `dry_run_or_exec` gracefully handles SIP permission errors instead of crashing
+- `utils::with_spinner` no longer leaks `trap RETURN` into calling function scope
+
+### Changed
+
+- **BREAKING**: Removed `--live` / `--no-dry-run` / `-L` flags — replaced with standard confirmation flow:
+  - Default behavior is dry-run (no flags needed)
+  - `--yes` without `--dry-run` triggers live cleanup (skips prompt)
+  - Running without `--dry-run` in a terminal prompts for confirmation
+- `devtools.sh`: node_modules and `__pycache__` scans now only search conventional project dirs
+  (`~/Developer`, `~/Projects`, `~/Code`, etc.) — excludes `.nvm`, `.vscode`, `.cursor`, `~/Library`
+- Improved orphan node_modules detection: checks parent AND grandparent for `package.json`
+- `.DS_Store` skip label changed from "protected by macOS" to "permission denied"
+- `CONTRIBUTING.md` — develop-branch workflow, fork+upstream instructions
+- `ci.yml` — triggers on `develop` branch, runs all test files via `bats tests/`
+- README: updated flags table, examples, and safety notes for new confirmation flow
+
 ## [0.2.0] - 2026-03-04
 
 ### Added

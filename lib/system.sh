@@ -118,18 +118,33 @@ system::_ds_store() {
 
   local count=0
   local total_bytes=0
+  local skipped=0
   while IFS= read -r file; do
     local fbytes
     fbytes=$(utils::get_size_bytes "$file")
     total_bytes=$(( total_bytes + fbytes ))
     (( count++ )) || true
-    dry_run_or_exec rm -f "$file"
+    if [[ "$DRY_RUN" == "true" ]]; then
+      log::info "[DRY-RUN] Would execute: rm -f ${file}"
+    else
+      if ! rm -f "$file" 2>/dev/null; then
+        log::verbose "  Skipped (permission denied): $file"
+        (( skipped++ )) || true
+      fi
+    fi
   done < <(find "$HOME" -maxdepth 4 -name ".DS_Store" -type f 2>/dev/null || true)
 
   _SYS_DSSTORE_TOTAL=$total_bytes
 
   if (( count > 0 )); then
-    log::info ".DS_Store: ${count} files ($(utils::format_bytes "$total_bytes"))"
+    local msg
+    if (( skipped > 0 )); then
+      local deleted=$(( count - skipped ))
+      msg=".DS_Store: ${deleted} of ${count} files deleted ($(utils::format_bytes "$total_bytes")) — ${skipped} skipped (permission denied)"
+    else
+      msg=".DS_Store: ${count} files ($(utils::format_bytes "$total_bytes"))"
+    fi
+    log::info "$msg"
   else
     log::info ".DS_Store: none found."
   fi
@@ -176,6 +191,30 @@ system::_dev_tool_caches() {
     dry_run_or_exec rm -rf "$npm_cache"
   else
     log::verbose "npm cache not found — skipping."
+  fi
+
+  # npm npx cache
+  local npx_cache="$HOME/.npm/_npx"
+  if [[ -d "$npx_cache" ]]; then
+    local npx_bytes
+    npx_bytes=$(utils::get_size_bytes "$npx_cache")
+    if (( npx_bytes > 0 )); then
+      _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + npx_bytes ))
+      log::info "npm npx cache: $(utils::format_bytes "$npx_bytes")"
+      dry_run_or_exec rm -rf "$npx_cache"
+    fi
+  fi
+
+  # npm logs
+  local npm_logs="$HOME/.npm/_logs"
+  if [[ -d "$npm_logs" ]]; then
+    local npm_logs_bytes
+    npm_logs_bytes=$(utils::get_size_bytes "$npm_logs")
+    if (( npm_logs_bytes > 0 )); then
+      _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + npm_logs_bytes ))
+      log::info "npm logs: $(utils::format_bytes "$npm_logs_bytes")"
+      dry_run_or_exec rm -rf "$npm_logs"
+    fi
   fi
 
   # pnpm store

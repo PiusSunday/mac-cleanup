@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute tarball SHA-256
+        id: sha256
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          URL="https://github.com/${{ github.repository }}/archive/${TAG}.tar.gz"
+          SHA=$(curl -sL "$URL" | shasum -a 256 | awk '{print $1}')
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Tarball SHA-256: $SHA"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            ## Installation
+
+            ### Homebrew
+            ```bash
+            brew tap PiusSunday/mac-cleanup
+            brew install mac-cleanup
+            ```
+
+            ### One-line installer
+            ```bash
+            curl -sL https://raw.githubusercontent.com/PiusSunday/mac-cleanup/main/install.sh | bash
+            ```
+
+            ## Tarball SHA-256
+            ```
+            ${{ steps.sha256.outputs.sha256 }}
+            ```
+
+            Update `Formula/mac-cleanup.rb` with this checksum.

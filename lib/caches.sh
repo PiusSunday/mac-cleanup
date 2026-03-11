@@ -18,6 +18,15 @@ caches::clean() {
   caches::_app_support_caches
   module_scanned=$(( module_scanned + _CACHES_APPSUPPORT_TOTAL ))
 
+  caches::_zsh_completion
+  module_scanned=$(( module_scanned + _CACHES_ZSH_TOTAL ))
+
+  caches::_spotify
+  module_scanned=$(( module_scanned + _CACHES_SPOTIFY_TOTAL ))
+
+  caches::_jetbrains
+  module_scanned=$(( module_scanned + _CACHES_JETBRAINS_TOTAL ))
+
   local disk_after
   disk_after=$(utils::get_free_bytes)
   local freed=$(( disk_after - disk_before ))
@@ -38,6 +47,9 @@ caches::clean() {
 _CACHES_USER_TOTAL=0
 _CACHES_LOGS_TOTAL=0
 _CACHES_APPSUPPORT_TOTAL=0
+_CACHES_ZSH_TOTAL=0
+_CACHES_SPOTIFY_TOTAL=0
+_CACHES_JETBRAINS_TOTAL=0
 
 caches::_user_caches() {
   _CACHES_USER_TOTAL=0
@@ -54,6 +66,8 @@ caches::_user_caches() {
   while IFS= read -r cache_dir; do
     local app_name
     app_name=$(basename "$cache_dir")
+    # Skip JetBrains — handled exclusively by caches::_jetbrains
+    [[ "$app_name" == "JetBrains" ]] && continue
     if caches::_is_app_running "$app_name"; then
       log::verbose "Skipping active app cache: ${app_name}"
       continue
@@ -131,4 +145,91 @@ caches::_is_app_running() {
     fi
   fi
   return 1
+}
+
+# ── Zsh completion cache ─────────────────────────────────────────────────────
+caches::_zsh_completion() {
+  _CACHES_ZSH_TOTAL=0
+  local total=0
+
+  while IFS= read -r zcomp; do
+    local size
+    size=$(utils::get_size_bytes "$zcomp")
+    total=$(( total + size ))
+    dry_run_or_exec rm -f "$zcomp"
+  done < <(find "$HOME" -maxdepth 1 -name ".zcompdump*" -type f 2>/dev/null || true)
+
+  _CACHES_ZSH_TOTAL=$total
+  if (( total > 0 )); then
+    log::info "Zsh completion cache: $(utils::format_bytes "$total")"
+  fi
+}
+
+# ── Spotify cache ────────────────────────────────────────────────────────────
+caches::_spotify() {
+  _CACHES_SPOTIFY_TOTAL=0
+  local spotify_cache="$HOME/Library/Caches/com.spotify.client"
+  if [[ -d "$spotify_cache" ]]; then
+    local size
+    size=$(utils::get_size_bytes "$spotify_cache")
+    if (( size > 0 )); then
+      _CACHES_SPOTIFY_TOTAL=$size
+      log::info "Spotify cache: $(utils::format_bytes "$size")"
+      dry_run_or_exec rm -rf "$spotify_cache"
+    fi
+  fi
+}
+
+# ── JetBrains IDE caches ──────────────────────────────────────────────────────
+caches::_jetbrains() {
+  _CACHES_JETBRAINS_TOTAL=0
+  local total=0
+
+  # Per-IDE system caches (~/Library/Caches/JetBrains/<IDEName><version>/)
+  local jetbrains_cache_root="$HOME/Library/Caches/JetBrains"
+  if [[ -d "$jetbrains_cache_root" ]]; then
+    while IFS= read -r ide_cache_dir; do
+      local size
+      size=$(utils::get_size_bytes "$ide_cache_dir")
+      if (( size > 0 )); then
+        local dirname
+        dirname="$(basename "$ide_cache_dir")"
+        log::info "  JetBrains ${dirname}: $(utils::format_bytes "$size")"
+        dry_run_or_exec rm -rf "$ide_cache_dir"
+        total=$(( total + size ))
+      fi
+    done < <(find "$jetbrains_cache_root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true)
+  fi
+
+  # Per-IDE log directories
+  local jetbrains_log_root="$HOME/Library/Logs/JetBrains"
+  if [[ -d "$jetbrains_log_root" ]]; then
+    local logs_size
+    logs_size=$(utils::get_size_bytes "$jetbrains_log_root")
+    if (( logs_size > 0 )); then
+      log::info "  JetBrains logs: $(utils::format_bytes "$logs_size")"
+      dry_run_or_exec rm -rf "$jetbrains_log_root"
+      total=$(( total + logs_size ))
+    fi
+  fi
+
+  # Application Support leftovers (skip Toolbox itself — it stores installed IDEs)
+  local jetbrains_support_root="$HOME/Library/Application Support/JetBrains"
+  if [[ -d "$jetbrains_support_root" ]]; then
+    while IFS= read -r support_dir; do
+      local dirname
+      dirname="$(basename "$support_dir")"
+      [[ "$dirname" == "Toolbox" ]] && continue
+      local size
+      size=$(utils::get_size_bytes "$support_dir")
+      if (( size > 0 )); then
+        log::info "  JetBrains AppSupport ${dirname}: $(utils::format_bytes "$size")"
+        dry_run_or_exec rm -rf "$support_dir"
+        total=$(( total + size ))
+      fi
+    done < <(find "$jetbrains_support_root" -mindepth 1 -maxdepth 1 -type d \
+      -not -name "Toolbox" 2>/dev/null || true)
+  fi
+
+  _CACHES_JETBRAINS_TOTAL=$total
 }
