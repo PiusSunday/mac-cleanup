@@ -66,6 +66,8 @@ caches::_user_caches() {
   while IFS= read -r cache_dir; do
     local app_name
     app_name=$(basename "$cache_dir")
+    # Skip JetBrains — handled exclusively by caches::_jetbrains
+    [[ "$app_name" == "JetBrains" ]] && continue
     if caches::_is_app_running "$app_name"; then
       log::verbose "Skipping active app cache: ${app_name}"
       continue
