@@ -96,7 +96,7 @@ bats tests/
 
 ```bash
 # Preview all cleanups — safe to run anytime (DEFAULT: dry-run)
-mac-cleanup --all --dry-run
+mac-cleanup --all
 
 # Preview Xcode + Docker cleanup
 mac-cleanup --xcode --docker
@@ -107,18 +107,16 @@ mac-cleanup --system
 # Find orphaned build artifacts
 mac-cleanup --devtools
 
-# Actually clean everything (will prompt for confirmation)
-mac-cleanup --all --live
-
-# Actually clean everything, skip prompts
-mac-cleanup --all --live --yes
+# Actually clean everything, skip prompts (live mode)
+mac-cleanup --all --yes
 
 # Show help
 mac-cleanup --help
 ```
 
 > **Note:** mac-cleanup runs in DRY-RUN mode by default and will NOT delete anything.
-> Pass `--live` to perform actual cleanup. You will be prompted for confirmation unless `--yes` is also passed.
+> To perform actual cleanup, run without `--dry-run`. You will be prompted for confirmation
+> unless `--yes` is also passed.
 
 ### Expected output
 
@@ -182,15 +180,13 @@ mac-cleanup --help
 | `--system`     | `-S`  | false    | Scan crash reports, .DS_Store, Trash, dev caches  |
 | `--xcode`      | `-x`  | false    | Clean Xcode artifacts                             |
 | `--docker`     | `-d`  | false    | Clean Docker resources                            |
-| `--devtools`   | `-D`  | false    | Clean orphaned node_modules, Rust, Python, Gradle |
+| `--devtools`   | `-D`  | false    | Clean node_modules, Rust, Python, Gradle, Flutter |
 | `--snapshots`  | `-s`  | false    | Remove local Time Machine snapshots               |
-| `--caches`     | `-c`  | false    | Clear user/system caches                          |
+| `--caches`     | `-c`  | false    | Clear user/system caches, Zsh, Spotify            |
 | `--brew`       | `-b`  | false    | Run Homebrew cleanup                              |
 | `--all`        | `-a`  | false    | Run all of the above                              |
-| `--live`       | `-L`  | false    | Perform actual cleanup (DELETE files)             |
-| `--no-dry-run` |       | false    | Alias for `--live`                                |
 | `--dry-run`    | `-n`  | **true** | Preview only — no deletions                       |
-| `--yes`        | `-y`  | false    | Skip confirmation prompts                         |
+| `--yes`        | `-y`  | false    | Skip confirmation and run live cleanup            |
 | `--verbose`    | `-v`  | false    | Show detailed output                              |
 | `--help`       | `-h`  | —        | Show help message                                 |
 
@@ -202,7 +198,7 @@ mac-cleanup --help
 
 ⚠️ **By default, mac-cleanup runs in DRY-RUN mode and will NOT delete anything.**
 
-To perform actual cleanup, pass `--live`. A prominent warning banner will appear, and you will be prompted for confirmation unless `--yes` is also passed.
+To perform actual cleanup, run without `--dry-run`. A prominent warning banner will appear, and you will be prompted for confirmation. Pass `--yes` to skip the prompt and proceed directly with live cleanup.
 
 ### What it will NEVER touch
 

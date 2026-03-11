@@ -9,8 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `--live` / `--no-dry-run` / `-L` flag for actual cleanup (DRY_RUN=false)
-- Prominent red LIVE MODE warning banner when running in live mode
+- Flutter/Dart build cache detection (`build/`, `.dart_tool/`, `~/.pub-cache`) in devtools module
+- npm `_npx` cache and `_logs` scanning in system module
+- Zsh completion cache (`.zcompdump*`) scanning in caches module
+- Spotify cache (`com.spotify.client`) scanning in caches module
 - BATS tests for `system.sh` (9 tests) and `devtools.sh` (10 tests) — total: 51 tests
 - `SECURITY.md` — vulnerability reporting policy
 - `CODE_OF_CONDUCT.md` — Contributor Covenant v2.1
@@ -20,9 +22,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING**: Removed `--live` / `--no-dry-run` / `-L` flags — replaced with standard confirmation flow:
+  - Default behavior is dry-run (no flags needed)
+  - `--yes` without `--dry-run` triggers live cleanup (skips prompt)
+  - Running without `--dry-run` in a terminal prompts for confirmation
+- `devtools.sh`: node_modules and `__pycache__` scans now only search conventional project dirs
+  (`~/Developer`, `~/Projects`, `~/Code`, etc.) — excludes `.nvm`, `.vscode`, `.cursor`, `~/Library`
+- Improved orphan node_modules detection: checks parent AND grandparent for `package.json`
+- `.DS_Store` skip label changed from "protected by macOS" to "permission denied"
+- Summary TOTAL status now correctly aggregates module statuses by priority (🗑 > ⚠ > 💡 > ✔)
+- Projected free space in dry-run mode now uses scanned totals (was showing 0 delta)
 - `CONTRIBUTING.md` — develop-branch workflow, fork+upstream instructions
 - `ci.yml` — triggers on `develop` branch, runs all test files via `bats tests/`
-- README: `--live` flag documentation, updated flags table and safety notes
+- README: updated flags table, examples, and safety notes for new confirmation flow
 
 ## [0.2.0] - 2026-03-04
 

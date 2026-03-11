@@ -17,24 +17,27 @@ setup() {
 @test "devtools::_node_modules: detects orphaned node_modules (no package.json)" {
   local old_home="$HOME"
   export HOME="${BATS_TEST_TMPDIR}/fake_home_orphan"
-  mkdir -p "$HOME/projects/orphan/node_modules"
-  echo "module data" > "$HOME/projects/orphan/node_modules/testfile"
+  mkdir -p "$HOME/Developer/orphan/node_modules"
+  echo "module data" > "$HOME/Developer/orphan/node_modules/testfile"
   # No package.json — this is orphaned
+  DEVTOOLS_SCAN_DIRS=("$HOME/Developer")
+  DEVTOOLS_EXCLUDE_PATHS=()
 
   _DEV_NODE_TOTAL=0
-  run devtools::_node_modules
+  local output
+  output=$(devtools::_node_modules 2>&1)
 
   export HOME="$old_home"
-  [ "$status" -eq 0 ]
   [[ "$output" == *"Orphaned"* ]]
 }
 
 @test "devtools::_node_modules: does not count active node_modules" {
   local old_home="$HOME"
   export HOME="${BATS_TEST_TMPDIR}/fake_home_active"
-  mkdir -p "$HOME/projects/active/node_modules"
-  echo '{"name":"test"}' > "$HOME/projects/active/package.json"
-  echo "module data" > "$HOME/projects/active/node_modules/testfile"
+  mkdir -p "$HOME/Developer/active/node_modules"
+  echo '{"name":"test"}' > "$HOME/Developer/active/package.json"
+  echo "module data" > "$HOME/Developer/active/node_modules/testfile"
+  DEVTOOLS_SCAN_DIRS=("$HOME/Developer")
 
   _DEV_NODE_TOTAL=0
   run devtools::_node_modules
@@ -48,7 +51,8 @@ setup() {
 @test "devtools::_node_modules: reports none when no node_modules exist" {
   local old_home="$HOME"
   export HOME="${BATS_TEST_TMPDIR}/fake_home_empty_nm"
-  mkdir -p "$HOME"
+  mkdir -p "$HOME/Developer"
+  DEVTOOLS_SCAN_DIRS=("$HOME/Developer")
 
   _DEV_NODE_TOTAL=0
   run devtools::_node_modules
@@ -76,8 +80,9 @@ setup() {
 @test "devtools::_rust_targets: skips target/ without Cargo.toml" {
   local old_home="$HOME"
   export HOME="${BATS_TEST_TMPDIR}/fake_home_rust_no_cargo"
-  mkdir -p "$HOME/projects/fake_rust/target"
-  echo "build data" > "$HOME/projects/fake_rust/target/testfile"
+  mkdir -p "$HOME/Developer/fake_rust/target"
+  echo "build data" > "$HOME/Developer/fake_rust/target/testfile"
+  DEVTOOLS_SCAN_DIRS=("$HOME/Developer")
   # No Cargo.toml — should be skipped
 
   _DEV_RUST_TOTAL=0
@@ -93,8 +98,10 @@ setup() {
 @test "devtools::_python_cache: detects __pycache__ directories" {
   local old_home="$HOME"
   export HOME="${BATS_TEST_TMPDIR}/fake_home_python"
-  mkdir -p "$HOME/projects/pyapp/__pycache__"
-  echo "bytecode" > "$HOME/projects/pyapp/__pycache__/module.pyc"
+  mkdir -p "$HOME/Developer/pyapp/__pycache__"
+  echo "bytecode" > "$HOME/Developer/pyapp/__pycache__/module.pyc"
+  DEVTOOLS_SCAN_DIRS=("$HOME/Developer")
+  PYCACHE_EXCLUDE_PATHS=()
 
   _DEV_PYTHON_TOTAL=0
   devtools::_python_cache > /dev/null 2>&1
@@ -106,7 +113,9 @@ setup() {
 @test "devtools::_python_cache: reports none when no __pycache__ exists" {
   local old_home="$HOME"
   export HOME="${BATS_TEST_TMPDIR}/fake_home_no_python"
-  mkdir -p "$HOME"
+  mkdir -p "$HOME/Developer"
+  DEVTOOLS_SCAN_DIRS=("$HOME/Developer")
+  PYCACHE_EXCLUDE_PATHS=()
 
   _DEV_PYTHON_TOTAL=0
   run devtools::_python_cache
@@ -152,6 +161,7 @@ setup() {
   devtools::_rust_targets() { _DEV_RUST_TOTAL=0; }
   devtools::_python_cache() { _DEV_PYTHON_TOTAL=0; }
   devtools::_gradle_cache() { _DEV_GRADLE_TOTAL=0; }
+  devtools::_flutter() { _DEV_FLUTTER_TOTAL=0; }
   utils::get_free_bytes() { echo 100000; }
 
   MODULE_NAMES=()

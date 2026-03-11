@@ -41,29 +41,28 @@ ${BOLD}TARGETS:${RESET}
   --system, -S       Scan crash reports, .DS_Store, Trash, dev caches
   --xcode, -x        Clean Xcode DerivedData, Archives, DeviceSupport
   --docker, -d       Clean Docker containers, images, volumes, build cache
-  --devtools, -D     Clean orphaned node_modules, Rust targets, __pycache__, Gradle
+  --devtools, -D     Clean orphaned node_modules, Rust targets, __pycache__, Gradle, Flutter
   --snapshots, -s    Delete local Time Machine snapshots
-  --caches, -c       Clear ~/Library/Caches and app caches
+  --caches, -c       Clear ~/Library/Caches, Zsh completion, Spotify, and app caches
   --brew, -b         Run brew cleanup and autoremove
   --all, -a          Run all cleanup targets
 
 ${BOLD}OPTIONS:${RESET}
-  --live, -L         Perform actual cleanup (DELETE files)
-  --no-dry-run       Alias for --live
   --dry-run, -n      Preview what would be deleted (DEFAULT — no files removed)
-  --yes, -y          Skip confirmation prompts
+  --yes, -y          Skip confirmation prompts and run live cleanup
   --verbose, -v      Show detailed logs
   --help, -h         Show this help
 
 ${BOLD}EXAMPLES:${RESET}
-  mac-cleanup --all --dry-run       Preview all cleanups (safe to run anytime)
-  mac-cleanup --xcode --docker      Clean Xcode + Docker (will ask to confirm)
+  mac-cleanup --all                 Preview all cleanups (dry-run by default)
+  mac-cleanup --all --yes           Clean everything, no prompts (live mode)
+  mac-cleanup --xcode --docker      Preview Xcode + Docker cleanup
   mac-cleanup --system              Scan system artifacts only
   mac-cleanup --devtools            Find orphaned build artifacts
-  mac-cleanup --all --yes           Clean everything, no prompts
 
 ${YELLOW}${WARN}  By default, mac-cleanup runs in DRY-RUN mode and will NOT delete anything.${RESET}
-   Pass --live to perform actual cleanup.
+   To actually delete files, run without --dry-run. You will be prompted for
+   confirmation unless --yes is also passed.
 
 EOF
 }
@@ -82,6 +81,8 @@ parse_flags() {
     log::warn "No flags provided. Running --all --dry-run by default."
     return
   fi
+
+  local explicit_dry_run=false
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -117,9 +118,7 @@ parse_flags() {
         ;;
       --dry-run|-n)
         DRY_RUN=true
-        ;;
-      --live|-L|--no-dry-run)
-        DRY_RUN=false
+        explicit_dry_run=true
         ;;
       --yes|-y)
         SKIP_CONFIRM=true
@@ -139,6 +138,29 @@ parse_flags() {
     esac
     shift
   done
+
+  # Determine effective mode after all flags are parsed
+  if [[ "$explicit_dry_run" == "true" ]]; then
+    # Explicit --dry-run — nothing to prompt
+    DRY_RUN=true
+  elif [[ "$SKIP_CONFIRM" == "true" ]]; then
+    # --yes without --dry-run — proceed with live cleanup silently
+    DRY_RUN=false
+  else
+    # Interactive: warn and prompt
+    printf '\n%s%s  ⚠  You are about to delete files. This cannot be undone.%s\n' \
+      "${BOLD}" "${YELLOW}" "${RESET}"
+    printf '   Run with --dry-run first to preview what will be removed.\n'
+    printf '   Continue with live cleanup? [y/N]: '
+    local _confirm
+    read -r _confirm
+    if [[ "$_confirm" =~ ^[Yy]$ ]]; then
+      DRY_RUN=false
+    else
+      log::info "Aborted. Re-run with --dry-run to preview safely."
+      exit 0
+    fi
+  fi
 }
 
 # ── Print upgraded summary report ─────────────────────────────────────────────
@@ -233,9 +255,34 @@ print_report() {
   local total_scanned_fmt
   total_scanned_fmt=$(utils::format_bytes "$total_scanned")
 
+  # Aggregate TOTAL status by priority: 🗑 > ⚠ > 💡 > ✔
   local total_status
-  if (( total_freed_bytes > 0 )); then
-    total_status="${GREEN}🗑 ${total_freed_fmt}${RESET}"
+  local has_freed=false has_skipped=false has_review=false
+  for (( i=0; i<module_count; i++ )); do
+    local st="${MODULE_STATUS[$i]}"
+    case "$st" in
+      clean) ;;
+      skipped) has_skipped=true ;;
+      review) has_review=true ;;
+      *)
+        if [[ "$st" =~ ^[0-9]+$ ]] && (( st > 0 )); then
+          has_freed=true
+        fi
+        ;;
+    esac
+  done
+
+  if [[ "$has_freed" == "true" ]]; then
+    # In dry-run, freed is 0 but scanned shows reclaimable; in live, use actual freed
+    local display_freed="$total_freed_calc"
+    if (( total_freed_calc == 0 && total_scanned > 0 )); then
+      display_freed="$total_scanned"
+    fi
+    total_status="${GREEN}🗑 $(utils::format_bytes "$display_freed")${RESET}"
+  elif [[ "$has_skipped" == "true" ]]; then
+    total_status="${YELLOW}⚠ Partial${RESET}"
+  elif [[ "$has_review" == "true" ]]; then
+    total_status="${CYAN}💡 Review${RESET}"
   else
     total_status="${GREEN}✔ Clean${RESET}"
   fi
@@ -250,8 +297,8 @@ print_report() {
   free_after_fmt=$(utils::format_bytes "$disk_after")
 
   if [[ "$DRY_RUN" == "true" ]]; then
-    # Project what free space would be after cleanup
-    local projected=$(( disk_before + total_freed_calc ))
+    # Project using scanned total as estimate of reclaimable bytes
+    local projected=$(( disk_before + total_scanned ))
     local projected_fmt
     projected_fmt=$(utils::format_bytes "$projected")
     printf '  Free space:  %s → %s (projected)\n' "$free_before_fmt" "$projected_fmt"
@@ -278,14 +325,10 @@ main() {
   # Show system context header
   utils::print_system_context
 
-  # Live mode: show warning banner and require confirmation
+  # Live mode: show warning banner
   if [[ "$DRY_RUN" != "true" ]]; then
     printf '\n  %s%s  ⚠  LIVE MODE — files will be permanently deleted%s\n\n' \
       "${BOLD}" "${RED}" "${RESET}"
-    utils::confirm "This will delete files from your system. Continue?" || {
-      log::info "Aborted by user."
-      exit 0
-    }
   fi
 
   # Snapshot free space before

@@ -18,6 +18,12 @@ caches::clean() {
   caches::_app_support_caches
   module_scanned=$(( module_scanned + _CACHES_APPSUPPORT_TOTAL ))
 
+  caches::_zsh_completion
+  module_scanned=$(( module_scanned + _CACHES_ZSH_TOTAL ))
+
+  caches::_spotify
+  module_scanned=$(( module_scanned + _CACHES_SPOTIFY_TOTAL ))
+
   local disk_after
   disk_after=$(utils::get_free_bytes)
   local freed=$(( disk_after - disk_before ))
@@ -38,6 +44,8 @@ caches::clean() {
 _CACHES_USER_TOTAL=0
 _CACHES_LOGS_TOTAL=0
 _CACHES_APPSUPPORT_TOTAL=0
+_CACHES_ZSH_TOTAL=0
+_CACHES_SPOTIFY_TOTAL=0
 
 caches::_user_caches() {
   _CACHES_USER_TOTAL=0
@@ -131,4 +139,37 @@ caches::_is_app_running() {
     fi
   fi
   return 1
+}
+
+# ── Zsh completion cache ─────────────────────────────────────────────────────
+caches::_zsh_completion() {
+  _CACHES_ZSH_TOTAL=0
+  local total=0
+
+  while IFS= read -r zcomp; do
+    local size
+    size=$(utils::get_size_bytes "$zcomp")
+    total=$(( total + size ))
+    dry_run_or_exec rm -f "$zcomp"
+  done < <(find "$HOME" -maxdepth 1 -name ".zcompdump*" -type f 2>/dev/null || true)
+
+  _CACHES_ZSH_TOTAL=$total
+  if (( total > 0 )); then
+    log::info "Zsh completion cache: $(utils::format_bytes "$total")"
+  fi
+}
+
+# ── Spotify cache ────────────────────────────────────────────────────────────
+caches::_spotify() {
+  _CACHES_SPOTIFY_TOTAL=0
+  local spotify_cache="$HOME/Library/Caches/com.spotify.client"
+  if [[ -d "$spotify_cache" ]]; then
+    local size
+    size=$(utils::get_size_bytes "$spotify_cache")
+    if (( size > 0 )); then
+      _CACHES_SPOTIFY_TOTAL=$size
+      log::info "Spotify cache: $(utils::format_bytes "$size")"
+      dry_run_or_exec rm -rf "$spotify_cache"
+    fi
+  fi
 }
