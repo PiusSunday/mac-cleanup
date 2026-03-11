@@ -122,7 +122,10 @@ dry_run_or_exec() {
     return 0
   fi
   log::verbose "Executing: ${pretty_cmd}"
-  "$@"
+  if ! "$@" 2>/dev/null; then
+    log::verbose "  ⚠ Permission denied: ${pretty_cmd}"
+    return 0
+  fi
 }
 
 # ── Confirmation prompt ───────────────────────────────────────────────────────
