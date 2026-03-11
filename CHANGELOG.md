@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.1] - 2026-03-11
 
 ### Added
 
@@ -13,12 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - npm `_npx` cache and `_logs` scanning in system module
 - Zsh completion cache (`.zcompdump*`) scanning in caches module
 - Spotify cache (`com.spotify.client`) scanning in caches module
+- JetBrains IDE cache cleanup (Caches, Logs, Application Support) in caches module
 - BATS tests for `system.sh` (9 tests) and `devtools.sh` (10 tests) — total: 51 tests
-- `SECURITY.md` — vulnerability reporting policy
-- `CODE_OF_CONDUCT.md` — Contributor Covenant v2.1
-- `.github/ISSUE_TEMPLATE/` — bug report and feature request templates
-- `.github/PULL_REQUEST_TEMPLATE.md` — PR checklist with develop-branch reminder
-- `.github/workflows/release.yml` — auto-create GitHub release with tarball SHA-256 on tag push
+
+### Fixed
+
+- Homebrew `brew cleanup -n` / `brew autoremove -n` no longer run during dry-run mode
+- Summary TOTAL status, footer free space, and "Run complete" line all derive from the same value
+- Header and footer free space now consistently display in GB (was showing GiB in header)
+- `dry_run_or_exec` gracefully handles SIP permission errors instead of crashing
+- `utils::with_spinner` no longer leaks `trap RETURN` into calling function scope
 
 ### Changed
 
@@ -30,8 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`~/Developer`, `~/Projects`, `~/Code`, etc.) — excludes `.nvm`, `.vscode`, `.cursor`, `~/Library`
 - Improved orphan node_modules detection: checks parent AND grandparent for `package.json`
 - `.DS_Store` skip label changed from "protected by macOS" to "permission denied"
-- Summary TOTAL status now correctly aggregates module statuses by priority (🗑 > ⚠ > 💡 > ✔)
-- Projected free space in dry-run mode now uses scanned totals (was showing 0 delta)
 - `CONTRIBUTING.md` — develop-branch workflow, fork+upstream instructions
 - `ci.yml` — triggers on `develop` branch, runs all test files via `bats tests/`
 - README: updated flags table, examples, and safety notes for new confirmation flow

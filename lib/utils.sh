@@ -291,7 +291,7 @@ utils::print_system_context() {
   macos_ver=$(sw_vers -productVersion 2>/dev/null || echo "unknown")
 
   local free_space
-  free_space=$(df -h / | awk 'NR==2 {print $4}')
+  free_space=$(utils::format_bytes "$(utils::get_free_bytes)")
 
   local user_mode="User mode"
   if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then

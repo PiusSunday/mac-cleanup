@@ -6,7 +6,7 @@ export DRY_RUN=${DRY_RUN:-true}
 export VERBOSE=${VERBOSE:-false}
 export SKIP_CONFIRM=${SKIP_CONFIRM:-false}
 export LOG_FILE=${LOG_FILE:-"$HOME/.mac-cleanup/cleanup.log"}
-export VERSION="0.2.0"
+export VERSION="0.2.1"
 
 # Cleanup targets (default: all false, set by CLI flags)
 export TARGET_SYSTEM=false

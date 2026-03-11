@@ -4,6 +4,7 @@
 ~/.mac-cleanup/cleanup.log
 
 docs/*.md
+docs/*.pdf
 
 node_modules/
 package.json

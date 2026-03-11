@@ -28,7 +28,7 @@ mac-cleanup gives you a single, safe command to reclaim all of it.
 | `--system`    | System        | Crash reports, `.DS_Store`, Trash, npm/pip/Go/pnpm caches           | 1–5 GB          |
 | `--xcode`     | Xcode         | DerivedData, Archives (90d+), iOS DeviceSupport, Simulators         | 10–80 GB        |
 | `--docker`    | Docker        | Stopped containers, unused images, build cache                      | 5–30 GB         |
-| `--devtools`  | Dev Artifacts | `node_modules` (orphaned), Rust `target/`, `__pycache__`, `.gradle` | 5–50 GB         |
+| `--devtools`  | Dev Artifacts | `node_modules` (orphaned), Rust `target/`, `__pycache__`, `.gradle`, Flutter `build/` | 5–50 GB         |
 | `--snapshots` | Snapshots     | Local Time Machine snapshots                                        | 5–20 GB         |
 | `--caches`    | Caches        | ~/Library/Caches, ~/Library/Logs, App Support caches                | 2–10 GB         |
 | `--brew`      | Homebrew      | Cached downloads, outdated versions, unused dependencies            | 1–5 GB          |
@@ -182,7 +182,7 @@ mac-cleanup --help
 | `--docker`     | `-d`  | false    | Clean Docker resources                            |
 | `--devtools`   | `-D`  | false    | Clean node_modules, Rust, Python, Gradle, Flutter |
 | `--snapshots`  | `-s`  | false    | Remove local Time Machine snapshots               |
-| `--caches`     | `-c`  | false    | Clear user/system caches, Zsh, Spotify            |
+| `--caches`     | `-c`  | false    | Clear user/system caches, Zsh, Spotify, JetBrains |
 | `--brew`       | `-b`  | false    | Run Homebrew cleanup                              |
 | `--all`        | `-a`  | false    | Run all of the above                              |
 | `--dry-run`    | `-n`  | **true** | Preview only — no deletions                       |

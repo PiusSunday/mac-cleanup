@@ -43,7 +43,7 @@ ${BOLD}TARGETS:${RESET}
   --docker, -d       Clean Docker containers, images, volumes, build cache
   --devtools, -D     Clean orphaned node_modules, Rust targets, __pycache__, Gradle, Flutter
   --snapshots, -s    Delete local Time Machine snapshots
-  --caches, -c       Clear ~/Library/Caches, Zsh completion, Spotify, and app caches
+  --caches, -c       Clear ~/Library/Caches, Zsh, Spotify, JetBrains, and app caches
   --brew, -b         Run brew cleanup and autoremove
   --all, -a          Run all cleanup targets
 
@@ -165,13 +165,9 @@ parse_flags() {
 
 # ── Print upgraded summary report ─────────────────────────────────────────────
 print_report() {
-  local total_freed_bytes="$1"
-  local duration="$2"
-  local disk_before="$3"
-  local disk_after="$4"
-
-  local total_freed_fmt
-  total_freed_fmt=$(utils::format_bytes "$total_freed_bytes")
+  local duration="$1"
+  local disk_before="$2"
+  local disk_after="$3"
 
   local mode_label="LIVE"
   if [[ "$DRY_RUN" == "true" ]]; then
@@ -273,12 +269,7 @@ print_report() {
   done
 
   if [[ "$has_freed" == "true" ]]; then
-    # In dry-run, freed is 0 but scanned shows reclaimable; in live, use actual freed
-    local display_freed="$total_freed_calc"
-    if (( total_freed_calc == 0 && total_scanned > 0 )); then
-      display_freed="$total_scanned"
-    fi
-    total_status="${GREEN}🗑 $(utils::format_bytes "$display_freed")${RESET}"
+    total_status="${GREEN}🗑 $(utils::format_bytes "$total_scanned")${RESET}"
   elif [[ "$has_skipped" == "true" ]]; then
     total_status="${YELLOW}⚠ Partial${RESET}"
   elif [[ "$has_review" == "true" ]]; then
@@ -309,6 +300,8 @@ print_report() {
   printf '  Log saved:   %s\n' "$LOG_FILE"
   printf '%s%s%s%s\n\n' "${BOLD}" "${BLUE}" "$bar" "${RESET}"
 
+  local total_freed_fmt
+  total_freed_fmt=$(utils::format_bytes "$total_scanned")
   log::success "Run complete. Total freed: ${total_freed_fmt} (${mode_label})"
 }
 
@@ -363,18 +356,13 @@ main() {
   # Snapshot free space after
   local disk_after
   disk_after=$(utils::get_free_bytes)
-  local freed=$(( disk_after - disk_before ))
-  # Ensure non-negative (dry-run won't free anything)
-  if (( freed < 0 )); then
-    freed=0
-  fi
 
   # Calculate duration
   local end_time
   end_time=$(date +%s)
   local duration=$(( end_time - start_time ))
 
-  print_report "$freed" "$duration" "$disk_before" "$disk_after"
+  print_report "$duration" "$disk_before" "$disk_after"
 }
 
 main "$@"
