@@ -100,6 +100,7 @@ mac-cleanup uses an automated GitHub Actions workflow for releases. To publish a
 2. Update `CHANGELOG.md` with the new version notes.
 3. Merge all changes into the `main` branch.
 4. Create and push a new Git tag matching the version (e.g., `v0.2.1`):
+
    ```bash
    git tag v0.2.1
    git push origin v0.2.1
@@ -110,6 +111,7 @@ Pushing the tag triggers the Release workflow, which automatically runs validati
 ### Required Secrets
 
 The release workflow requires the following repository secret in GitHub Settings:
+
 - `TAP_GITHUB_TOKEN`: A Personal Access Token (PAT) with `repo` scope, used to automatically push Formula updates to the `homebrew-mac-cleanup` tap repository.
 
 ## License
