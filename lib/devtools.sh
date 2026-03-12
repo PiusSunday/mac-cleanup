@@ -53,18 +53,25 @@ PYCACHE_EXCLUDE_PATHS=(
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-# Build find exclusion args from an array of paths
-# Usage: devtools::_build_exclude_args ARRAY_NAME
+# Build find exclusion args securely into a caller's array
+# Usage: devtools::_build_exclude_args IN_ARRAY_NAME OUT_ARRAY_NAME
 devtools::_build_exclude_args() {
-  local array_name="$1[@]"
-  local args=()
+  local in_array="$1[@]"
+  local out_array="$2"
+  local -a tmp=()
   local p
-  for p in "${!array_name}"; do
+  for p in "${!in_array}"; do
     if [[ -d "$p" ]]; then
-      args+=(-not -path "$p/*")
+      tmp+=("-path" "$p" "-prune" "-o")
     fi
   done
-  echo "${args[@]}"
+  # Assign tmp to out_array securely
+  local assign_str="${out_array}=("
+  for p in "${tmp[@]}"; do
+    assign_str+=" $(printf '%q' "$p")"
+  done
+  assign_str+=" )"
+  eval "$assign_str"
 }
 
 # Check if a node_modules has a nearby package.json (parent or grandparent)
@@ -147,13 +154,12 @@ devtools::_node_modules() {
   local total_bytes=0
 
   # Build exclusion args
-  local exclude_args
-  exclude_args=$(devtools::_build_exclude_args DEVTOOLS_EXCLUDE_PATHS)
+  local exclude_args=()
+  devtools::_build_exclude_args DEVTOOLS_EXCLUDE_PATHS exclude_args
 
   for scan_dir in "${DEVTOOLS_SCAN_DIRS[@]}"; do
     [[ -d "$scan_dir" ]] || continue
 
-    # shellcheck disable=SC2086
     while IFS= read -r nm_dir; do
       [[ -n "$nm_dir" ]] || continue
       local size_bytes
@@ -196,7 +202,7 @@ devtools::_node_modules() {
       else
         log::verbose "  Active: ${nm_dir} (${size_fmt})"
       fi
-    done < <(find "$scan_dir" -maxdepth 6 -name "node_modules" -type d -prune $exclude_args 2>/dev/null || true)
+    done < <(find "$scan_dir" -maxdepth 6 "${exclude_args[@]}" -name "node_modules" -type d -prune 2>/dev/null || true)
   done
 
   _DEV_NODE_TOTAL=$total_bytes
@@ -222,13 +228,12 @@ devtools::_rust_targets() {
   local total_count=0
   local total_bytes=0
 
-  local exclude_args
-  exclude_args=$(devtools::_build_exclude_args DEVTOOLS_EXCLUDE_PATHS)
+  local exclude_args=()
+  devtools::_build_exclude_args DEVTOOLS_EXCLUDE_PATHS exclude_args
 
   for scan_dir in "${DEVTOOLS_SCAN_DIRS[@]}"; do
     [[ -d "$scan_dir" ]] || continue
 
-    # shellcheck disable=SC2086
     while IFS= read -r target_dir; do
       [[ -n "$target_dir" ]] || continue
       local parent_dir
@@ -254,7 +259,7 @@ devtools::_rust_targets() {
         utils::with_spinner "Running cargo clean in ${parent_dir}..." \
           bash -c 'cd "$1" && cargo clean' _ "$parent_dir"
       fi
-    done < <(find "$scan_dir" -maxdepth 6 -name "target" -type d $exclude_args 2>/dev/null || true)
+    done < <(find "$scan_dir" -maxdepth 6 "${exclude_args[@]}" -name "target" -type d 2>/dev/null || true)
   done
 
   _DEV_RUST_TOTAL=$total_bytes
@@ -275,13 +280,12 @@ devtools::_python_cache() {
   local total_bytes=0
 
   # Build exclusion args from pycache-specific list
-  local exclude_args
-  exclude_args=$(devtools::_build_exclude_args PYCACHE_EXCLUDE_PATHS)
+  local exclude_args=()
+  devtools::_build_exclude_args PYCACHE_EXCLUDE_PATHS exclude_args
 
   for scan_dir in "${DEVTOOLS_SCAN_DIRS[@]}"; do
     [[ -d "$scan_dir" ]] || continue
 
-    # shellcheck disable=SC2086
     while IFS= read -r cache_dir; do
       [[ -n "$cache_dir" ]] || continue
       local size_bytes
@@ -295,7 +299,7 @@ devtools::_python_cache() {
       -not -path "*/env/*" \
       -not -path "*/.env/*" \
       -not -path "*/site-packages/*" \
-      $exclude_args 2>/dev/null || true)
+      "${exclude_args[@]}" 2>/dev/null || true)
   done
 
   _DEV_PYTHON_TOTAL=$total_bytes

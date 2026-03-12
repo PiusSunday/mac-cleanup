@@ -37,7 +37,7 @@ mac-cleanup operates on user files and system caches. The following are in scope
 
 ## Design Principles
 
-- **Dry-run by default** — no files deleted without explicit `--live` flag
-- **Confirmation required** — live mode prompts before destructive actions
+- **Dry-run by default** — no files are deleted unless you explicitly confirm or pass the `--yes` flag
+- **Confirmation required** — destructive actions require interactive confirmation unless `--yes` is provided
 - **Never touches** system directories (`/System`, `/usr`, `/bin`, `/sbin`), keychains, or iPhone backups
 - **Transparent** — all actions logged to `~/.mac-cleanup/cleanup.log`

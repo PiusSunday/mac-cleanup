@@ -130,6 +130,7 @@ system::_ds_store() {
       if ! rm -f "$file" 2>/dev/null; then
         log::verbose "  Skipped (permission denied): $file"
         (( skipped++ )) || true
+        total_bytes=$(( total_bytes - fbytes ))
       fi
     fi
   done < <(find "$HOME" \
