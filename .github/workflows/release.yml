@@ -39,7 +39,7 @@ jobs:
           TAG="${GITHUB_REF#refs/tags/}"
           URL="https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz"
           # Wait briefly for GitHub archive cache to stabilize if needed
-          sleep 5
+          sleep 30
           SHA=$(curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$URL" | shasum -a 256 | awk '{print $1}')
           echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
