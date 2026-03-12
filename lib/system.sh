@@ -254,20 +254,6 @@ system::_dev_tool_caches() {
     fi
   fi
 
-  # pnpm store
-  if command -v pnpm &>/dev/null; then
-    local pnpm_path
-    pnpm_path=$(pnpm store path 2>/dev/null || true)
-    if [[ -n "$pnpm_path" && -d "$pnpm_path" ]]; then
-      local pnpm_bytes
-      pnpm_bytes=$(utils::get_size_bytes "$pnpm_path")
-      log::info "pnpm store (not auto-cleaned): $(utils::format_bytes "$pnpm_bytes")"
-      log::info "  → Run: pnpm store prune"
-    fi
-  else
-    log::verbose "pnpm not installed — skipping."
-  fi
-
   # pip cache
   local pip_cache="$HOME/Library/Caches/pip"
   if [[ -d "$pip_cache" ]]; then
@@ -293,6 +279,54 @@ system::_dev_tool_caches() {
     fi
   else
     log::verbose "Go not installed — skipping."
+  fi
+
+  # Google Cloud SDK logs
+  local gcloud_logs="$HOME/.config/gcloud/logs"
+  if [[ -d "$gcloud_logs" ]]; then
+    local gcloud_logs_bytes
+    gcloud_logs_bytes=$(utils::get_size_bytes "$gcloud_logs")
+    if (( gcloud_logs_bytes > 0 )); then
+      _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + gcloud_logs_bytes ))
+      log::info "Google Cloud logs: $(utils::format_bytes "$gcloud_logs_bytes")"
+      dry_run_or_exec rm -rf "$gcloud_logs"
+    fi
+  fi
+
+  # Google Cloud SDK cache
+  local gcloud_cache="$HOME/.config/gcloud/.cache"
+  if [[ -d "$gcloud_cache" ]]; then
+    local gcloud_cache_bytes
+    gcloud_cache_bytes=$(utils::get_size_bytes "$gcloud_cache")
+    if (( gcloud_cache_bytes > 0 )); then
+      _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + gcloud_cache_bytes ))
+      log::info "Google Cloud cache: $(utils::format_bytes "$gcloud_cache_bytes")"
+      dry_run_or_exec rm -rf "$gcloud_cache"
+    fi
+  fi
+
+  # Kubernetes client cache
+  local kube_cache="$HOME/.kube/cache"
+  if [[ -d "$kube_cache" ]]; then
+    local kube_bytes
+    kube_bytes=$(utils::get_size_bytes "$kube_cache")
+    if (( kube_bytes > 0 )); then
+      _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + kube_bytes ))
+      log::info "Kubernetes cache: $(utils::format_bytes "$kube_bytes")"
+      dry_run_or_exec rm -rf "$kube_cache"
+    fi
+  fi
+
+  # AWS CLI cache
+  local aws_cache="$HOME/.aws/cli/cache"
+  if [[ -d "$aws_cache" ]]; then
+    local aws_bytes
+    aws_bytes=$(utils::get_size_bytes "$aws_cache")
+    if (( aws_bytes > 0 )); then
+      _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + aws_bytes ))
+      log::info "AWS CLI cache: $(utils::format_bytes "$aws_bytes")"
+      dry_run_or_exec rm -rf "$aws_cache"
+    fi
   fi
 }
 

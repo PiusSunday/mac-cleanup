@@ -100,11 +100,20 @@ devtools::clean() {
   devtools::_rust_targets
   module_scanned=$(( module_scanned + _DEV_RUST_TOTAL ))
 
+  devtools::_cargo_cache
+  module_scanned=$(( module_scanned + _DEV_CARGO_TOTAL ))
+
   devtools::_python_cache
   module_scanned=$(( module_scanned + _DEV_PYTHON_TOTAL ))
 
   devtools::_gradle_cache
   module_scanned=$(( module_scanned + _DEV_GRADLE_TOTAL ))
+
+  devtools::_ruby
+  module_scanned=$(( module_scanned + _DEV_RUBY_TOTAL ))
+
+  devtools::_pnpm
+  module_scanned=$(( module_scanned + _DEV_PNPM_TOTAL ))
 
   devtools::_flutter
   module_scanned=$(( module_scanned + _DEV_FLUTTER_TOTAL ))
@@ -128,8 +137,11 @@ devtools::clean() {
 
 _DEV_NODE_TOTAL=0
 _DEV_RUST_TOTAL=0
+_DEV_CARGO_TOTAL=0
 _DEV_PYTHON_TOTAL=0
 _DEV_GRADLE_TOTAL=0
+_DEV_RUBY_TOTAL=0
+_DEV_PNPM_TOTAL=0
 _DEV_FLUTTER_TOTAL=0
 
 # ── a) node_modules ──────────────────────────────────────────────────────────
@@ -314,6 +326,127 @@ devtools::_gradle_cache() {
 
   log::info "Gradle cache: $(utils::format_bytes "$size_bytes")"
   dry_run_or_exec rm -rf "$path"
+}
+
+# ── e) Ruby Bundler + Gem cache ───────────────────────────────────────────────
+devtools::_ruby() {
+  _DEV_RUBY_TOTAL=0
+
+  if ! utils::require ruby && ! utils::require gem && ! utils::require bundle; then
+    log::verbose "Ruby not installed — skipping Ruby cache scan."
+    return 0
+  fi
+
+  log::info "Scanning for Ruby caches..."
+  local total=0
+
+  # Bundler cache — downloaded gem tarballs, safe to delete
+  local bundler_cache="$HOME/.bundle/cache"
+  if [[ -d "$bundler_cache" ]]; then
+    local size
+    size=$(utils::get_size_bytes "$bundler_cache")
+    if (( size > 0 )); then
+      log::info "  Ruby Bundler cache: $(utils::format_bytes "$size")"
+      dry_run_or_exec rm -rf "$bundler_cache"
+      total=$(( total + size ))
+    fi
+  fi
+
+  # RubyGems cache subdirectory only — never delete ~/.gem itself
+  local gem_cache="$HOME/.gem/cache"
+  if [[ -d "$gem_cache" ]]; then
+    local size
+    size=$(utils::get_size_bytes "$gem_cache")
+    if (( size > 0 )); then
+      log::info "  RubyGems cache: $(utils::format_bytes "$size")"
+      dry_run_or_exec rm -rf "$gem_cache"
+      total=$(( total + size ))
+    fi
+  fi
+
+  # rbenv cache
+  if utils::require rbenv; then
+    local rbenv_cache="$HOME/.rbenv/cache"
+    if [[ -d "$rbenv_cache" ]]; then
+      local size
+      size=$(utils::get_size_bytes "$rbenv_cache")
+      if (( size > 0 )); then
+        log::info "  rbenv cache: $(utils::format_bytes "$size")"
+        dry_run_or_exec rm -rf "$rbenv_cache"
+        total=$(( total + size ))
+      fi
+    fi
+  fi
+
+  _DEV_RUBY_TOTAL=$total
+  if (( total == 0 )); then
+    log::verbose "Ruby caches: nothing to clean."
+  fi
+}
+
+# ── f) Cargo registry cache ──────────────────────────────────────────────────
+devtools::_cargo_cache() {
+  _DEV_CARGO_TOTAL=0
+
+  if ! utils::require cargo; then
+    log::verbose "cargo not installed — skipping Cargo cache scan."
+    return 0
+  fi
+
+  local total=0
+
+  local cargo_registry="$HOME/.cargo/registry/cache"
+  if [[ -d "$cargo_registry" ]]; then
+    local size
+    size=$(utils::get_size_bytes "$cargo_registry")
+    if (( size > 0 )); then
+      log::info "  Cargo registry cache: $(utils::format_bytes "$size")"
+      dry_run_or_exec rm -rf "$cargo_registry"
+      total=$(( total + size ))
+    fi
+  fi
+
+  local cargo_git="$HOME/.cargo/git/db"
+  if [[ -d "$cargo_git" ]]; then
+    local size
+    size=$(utils::get_size_bytes "$cargo_git")
+    if (( size > 0 )); then
+      log::info "  Cargo git cache: $(utils::format_bytes "$size")"
+      dry_run_or_exec rm -rf "$cargo_git"
+      total=$(( total + size ))
+    fi
+  fi
+
+  _DEV_CARGO_TOTAL=$total
+  if (( total > 0 )); then
+    log::info "Cargo cache: $(utils::format_bytes "$total")"
+  fi
+}
+
+# ── g) pnpm store prune ──────────────────────────────────────────────────────
+devtools::_pnpm() {
+  _DEV_PNPM_TOTAL=0
+
+  if ! utils::require pnpm; then
+    log::verbose "pnpm not installed — skipping."
+    return 0
+  fi
+
+  local pnpm_path
+  pnpm_path=$(pnpm store path 2>/dev/null || true)
+  [[ -n "$pnpm_path" && -d "$pnpm_path" ]] || return 0
+
+  local size_before
+  size_before=$(utils::get_size_bytes "$pnpm_path")
+  log::info "  pnpm store: $(utils::format_bytes "$size_before") at ${pnpm_path}"
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    log::info "[DRY-RUN] Would run: pnpm store prune"
+  else
+    utils::with_spinner "Running pnpm store prune..." pnpm store prune
+  fi
+
+  _DEV_PNPM_TOTAL=$size_before
 }
 
 # ── e) Flutter/Dart build artifacts ──────────────────────────────────────────
