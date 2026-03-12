@@ -55,9 +55,10 @@ teardown() {
 @test "dry_run_or_exec: executes command when DRY_RUN=false" {
   DRY_RUN=false
   VERBOSE=false
-  run dry_run_or_exec echo EXECUTED
+  local test_file="${BATS_TEST_TMPDIR}/exec_test_file"
+  run dry_run_or_exec touch "$test_file"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"EXECUTED"* ]]
+  [ -e "$test_file" ]
 }
 
 @test "dry_run_or_exec: shows DRY-RUN message when DRY_RUN=true" {

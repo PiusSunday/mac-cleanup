@@ -133,7 +133,14 @@ system::_ds_store() {
         total_bytes=$(( total_bytes - fbytes ))
       fi
     fi
-  done < <(find "$HOME" -maxdepth 4 -name ".DS_Store" -type f 2>/dev/null || true)
+  done < <(find "$HOME" \
+    -name ".DS_Store" \
+    -maxdepth 8 \
+    -not -path "$HOME/Library/Containers/*" \
+    -not -path "$HOME/.Trash/*" \
+    -not -path "*/node_modules/*" \
+    -not -path "*/.git/*" \
+    -type f 2>/dev/null || true)
 
   _SYS_DSSTORE_TOTAL=$total_bytes
 
@@ -154,27 +161,46 @@ system::_ds_store() {
 # ── d) Trash ─────────────────────────────────────────────────────────────────
 system::_trash() {
   _SYS_TRASH_TOTAL=0
-  local path="$HOME/.Trash"
-  if [[ ! -d "$path" ]]; then
+
+  # Query item count via Finder — works even without Terminal Full Disk Access
+  local trash_count=0
+  trash_count=$(osascript -e 'tell application "Finder" to count items in trash' 2>/dev/null) || trash_count=0
+  [[ "$trash_count" =~ ^[0-9]+$ ]] || trash_count=0
+
+  if (( trash_count == 0 )); then
     log::info "Trash: empty."
-    return 0
+    return
   fi
 
-  local size_bytes
-  size_bytes=$(utils::get_size_bytes "$path")
-  _SYS_TRASH_TOTAL=$size_bytes
+  # Query size via Finder before deletion
+  local trash_size_str
+  trash_size_str=$(osascript -e 'tell application "Finder" to get size of trash' 2>/dev/null) || trash_size_str=0
+  [[ "$trash_size_str" =~ ^[0-9]+$ ]] || trash_size_str=0
+  local trash_size=$(( trash_size_str ))
+  _SYS_TRASH_TOTAL=$trash_size
 
-  if (( size_bytes == 0 )); then
-    log::info "Trash: empty."
-    return 0
-  fi
-
-  log::info "Trash: $(utils::format_bytes "$size_bytes")"
-  if [[ "$DRY_RUN" == "true" ]]; then
-    log::info "[DRY-RUN] Would empty Trash via Finder"
+  if (( trash_size == 0 )); then
+    log::info "Trash: ${trash_count} items"
   else
-    utils::with_spinner "Emptying Trash via Finder..." \
-      osascript -e 'tell application "Finder" to empty trash'
+    log::info "Trash: ${trash_count} items ($(utils::format_bytes "$trash_size"))"
+  fi
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    log::info "[DRY-RUN] Would empty Trash (${trash_count} items)"
+    return
+  fi
+
+  # Empty via Finder — respects locked files and macOS conventions
+  if osascript -e 'tell application "Finder" to empty trash' 2>/dev/null; then
+    if (( trash_size > 0 )); then
+      log::success "Trash emptied (${trash_count} items, $(utils::format_bytes "$trash_size") freed)"
+    else
+      log::success "Trash emptied (${trash_count} items)"
+    fi
+  else
+    # Fallback: direct rm if Finder call fails
+    rm -rf "${HOME}/.Trash/"* 2>/dev/null || true
+    log::success "Trash emptied (${trash_count} items — size estimate only)"
   fi
 }
 

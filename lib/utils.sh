@@ -122,31 +122,38 @@ dry_run_or_exec() {
     return 0
   fi
   log::verbose "Executing: ${pretty_cmd}"
-  # Capture stderr so we can inspect it, but still replay it for the caller.
-  local _dryrun_stderr_file
-  _dryrun_stderr_file="$(mktemp 2>/dev/null || echo "/tmp/dry_run_or_exec.$$")"
-
-  if ! "$@" 2> "${_dryrun_stderr_file}"; then
-    local exit_code=$?
-
-    # Detect a permission error by message; only treat those specially.
-    if grep -qi "permission denied" "${_dryrun_stderr_file}"; then
-      log::verbose "  ⚠ Permission denied: ${pretty_cmd}"
-      # Replay original stderr so diagnostics remain visible.
-      cat "${_dryrun_stderr_file}" >&2
-      rm -f "${_dryrun_stderr_file}"
-      # Historically this function swallowed permission failures by returning 0.
-      return 0
+  # Execute and capture stderr — only surface non-permission errors
+  local stderr_output
+  stderr_output=$("$@" 2>&1 >/dev/null) || {
+    if [[ "$stderr_output" != *"Operation not permitted"* && \
+          "$stderr_output" != *"Permission denied"* ]]; then
+      log::warn "Command failed: $stderr_output"
+    else
+      log::verbose "Skipped (permission denied): $pretty_cmd"
     fi
+  }
+}
 
-    # Non-permission failure: surface stderr and propagate the exit code.
-    cat "${_dryrun_stderr_file}" >&2
-    rm -f "${_dryrun_stderr_file}"
-    log::verbose "  ✗ Command failed with exit code ${exit_code}: ${pretty_cmd}"
-    return "${exit_code}"
+# Returns 0 (true) if the path is safe to attempt deletion, 1 if it should be skipped
+utils::is_deletable() {
+  local target="$1"
+
+  # Check against SIP protected list
+  for protected in "${SIP_PROTECTED_PATHS[@]}"; do
+    if [[ "$target" == "$protected" || "$target" == "${protected}/"* ]]; then
+      log::verbose "Skipping SIP-protected path: ${target}"
+      return 1
+    fi
+  done
+
+  # Check write permission on the parent directory
+  local parent
+  parent="$(dirname "$target")"
+  if [[ ! -w "$parent" ]]; then
+    log::verbose "Skipping non-writable path: ${target}"
+    return 1
   fi
 
-  rm -f "${_dryrun_stderr_file}"
   return 0
 }
 

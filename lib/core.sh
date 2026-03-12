@@ -6,7 +6,7 @@ export DRY_RUN=${DRY_RUN:-true}
 export VERBOSE=${VERBOSE:-false}
 export SKIP_CONFIRM=${SKIP_CONFIRM:-false}
 export LOG_FILE=${LOG_FILE:-"$HOME/.mac-cleanup/cleanup.log"}
-export VERSION="0.2.1"
+export VERSION="0.2.2"
 
 # Cleanup targets (default: all false, set by CLI flags)
 export TARGET_SYSTEM=false
@@ -27,3 +27,18 @@ declare -a MODULE_CATEGORIES=()
 declare -a MODULE_SCANNED=()
 declare -a MODULE_FREED=()
 declare -a MODULE_STATUS=()
+
+# Paths that macOS SIP or system ownership protects — never attempt deletion
+# Adding a path here prevents all modules from queuing it for rm
+readonly SIP_PROTECTED_PATHS=(
+  "$HOME/Library/Caches/com.apple.HomeKit"
+  "$HOME/Library/Caches/CloudKit"
+  "$HOME/Library/Caches/com.apple.Safari"
+  "$HOME/Library/Caches/com.apple.homed"
+  "$HOME/Library/Caches/com.apple.bird"
+  "$HOME/Library/Caches/com.apple.nsurlsessiond"
+  "$HOME/Library/Caches/com.apple.ap.adprivacyd"
+  "$HOME/Library/Logs"
+  "/private/var/log"
+  "/Library/Logs"
+)
