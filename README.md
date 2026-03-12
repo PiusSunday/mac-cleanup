@@ -25,12 +25,12 @@ mac-cleanup gives you a single, safe command to reclaim all of it.
 
 | Flag          | Module        | What it targets                                                                       | Typical Savings |
 | ------------- | ------------- | ------------------------------------------------------------------------------------- | --------------- |
-| `--system`    | System        | Crash reports, `.DS_Store`, Trash, npm/pip/Go/pnpm caches                             | 1–5 GB          |
+| `--system`    | System        | Crash reports, `.DS_Store`, Trash, npm/pip/Go caches, Google Cloud logs, Kubernetes cache, AWS CLI cache | 1–5 GB          |
 | `--xcode`     | Xcode         | DerivedData, Archives (90d+), iOS DeviceSupport, Simulators                           | 10–80 GB        |
 | `--docker`    | Docker        | Stopped containers, unused images, build cache                                        | 5–30 GB         |
-| `--devtools`  | Dev Artifacts | `node_modules` (orphaned), Rust `target/`, `__pycache__`, `.gradle`, Flutter `build/` | 5–50 GB         |
+| `--devtools`  | Dev Artifacts | `node_modules` (orphaned), Rust `target/`, Cargo registry cache, `__pycache__`, `.gradle`, Ruby Bundler/Gem, pnpm store prune, Flutter `build/` | 5–50 GB         |
 | `--snapshots` | Snapshots     | Local Time Machine snapshots                                                          | 5–20 GB         |
-| `--caches`    | Caches        | ~/Library/Caches, ~/Library/Logs, App Support caches                                  | 2–10 GB         |
+| `--caches`    | Caches        | ~/Library/Caches, Browsers (Chrome/Firefox/Edge/Arc/Brave), sandboxed app containers, Saved Application State, Antigravity, Oh My Zsh, ~/Library/Logs, App Support caches | 2–10 GB         |
 | `--brew`      | Homebrew      | Cached downloads, outdated versions, unused dependencies                              | 1–5 GB          |
 
 ### System Data clues
@@ -180,9 +180,9 @@ mac-cleanup --help
 | `--system`    | `-S`  | false    | Scan crash reports, .DS_Store, Trash, dev caches  |
 | `--xcode`     | `-x`  | false    | Clean Xcode artifacts                             |
 | `--docker`    | `-d`  | false    | Clean Docker resources                            |
-| `--devtools`  | `-D`  | false    | Clean node_modules, Rust, Python, Gradle, Flutter |
+| `--devtools`  | `-D`  | false    | Clean node_modules, Rust, Cargo, Python, Gradle, Ruby, pnpm, Flutter |
 | `--snapshots` | `-s`  | false    | Remove local Time Machine snapshots               |
-| `--caches`    | `-c`  | false    | Clear user/system caches, Zsh, Spotify, JetBrains |
+| `--caches`    | `-c`  | false    | Clear user/system caches, browsers, containers, Saved App State, Antigravity, Zsh, Spotify, JetBrains |
 | `--brew`      | `-b`  | false    | Run Homebrew cleanup                              |
 | `--all`       | `-a`  | false    | Run all of the above                              |
 | `--dry-run`   | `-n`  | **true** | Preview only — no deletions                       |

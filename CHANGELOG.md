@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-12
+
+### Added
+
+- Browser cache cleaning (Chrome, Firefox, Edge, Arc, Brave, Opera, Vivaldi) — skips if browser is running
+- Sandboxed app container cache cleaning (`~/Library/Containers/*/Data/Library/Caches`) — skips `com.apple.*` containers
+- Saved Application State (`~/Library/Saved Application State`) cleaning
+- Antigravity GPU/Dawn/WebGPU/code/extension cache cleaning
+- Oh My Zsh cache contents cleaning (preserves directory); renamed `_zsh_completion` → `_shell_caches`
+- Ruby Bundler cache, RubyGems cache, and rbenv cache cleaning in devtools module
+- Cargo registry and git cache cleaning in devtools module
+- pnpm store prune in devtools module (moved from system reporting-only block)
+- Google Cloud SDK logs and cache cleaning in system module
+- Kubernetes client cache (`~/.kube/cache`) cleaning in system module
+- AWS CLI cache (`~/.aws/cli/cache`) cleaning in system module
+
+### Removed
+
+- pnpm reporting-only block from `system::_dev_tool_caches` (replaced by `devtools::_pnpm` with actual cleanup)
+
 ## [0.2.2] - 2026-03-12
 
 ### Fixed
