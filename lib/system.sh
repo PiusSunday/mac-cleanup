@@ -158,12 +158,22 @@ system::_ds_store() {
 }
 
 # ── d) Trash ─────────────────────────────────────────────────────────────────
+
+# Run osascript with a timeout (seconds). Returns 1 on timeout or failure.
+# Uses perl alarm() — available on all macOS versions, no background processes.
+_osascript_timed() {
+  local secs=$1
+  shift
+  perl -e 'alarm shift @ARGV; exec @ARGV' "$secs" osascript "$@" 2>/dev/null
+}
+
 system::_trash() {
   _SYS_TRASH_TOTAL=0
 
   # Query item count via Finder — works even without Terminal Full Disk Access
+  # Timeout after 5 s so CI / headless runners don't hang
   local trash_count=0
-  trash_count=$(osascript -e 'tell application "Finder" to count items in trash' 2>/dev/null) || trash_count=0
+  trash_count=$(_osascript_timed 5 -e 'tell application "Finder" to count items in trash') || trash_count=0
   [[ "$trash_count" =~ ^[0-9]+$ ]] || trash_count=0
 
   if (( trash_count == 0 )); then
@@ -173,7 +183,7 @@ system::_trash() {
 
   # Query size via Finder before deletion
   local trash_size_str
-  trash_size_str=$(osascript -e 'tell application "Finder" to get size of trash' 2>/dev/null) || trash_size_str=0
+  trash_size_str=$(_osascript_timed 5 -e 'tell application "Finder" to get size of trash') || trash_size_str=0
   [[ "$trash_size_str" =~ ^[0-9]+$ ]] || trash_size_str=0
   local trash_size=$(( trash_size_str ))
   _SYS_TRASH_TOTAL=$trash_size
@@ -190,14 +200,14 @@ system::_trash() {
   fi
 
   # Empty via Finder — respects locked files and macOS conventions
-  if osascript -e 'tell application "Finder" to empty trash' 2>/dev/null; then
+  if _osascript_timed 10 -e 'tell application "Finder" to empty trash'; then
     if (( trash_size > 0 )); then
       log::success "Trash emptied (${trash_count} items, $(utils::format_bytes "$trash_size") freed)"
     else
       log::success "Trash emptied (${trash_count} items)"
     fi
   else
-    # Fallback: direct rm if Finder call fails
+    # Fallback: direct rm if Finder call fails or times out
     rm -rf "${HOME}/.Trash/"* 2>/dev/null || true
     log::success "Trash emptied (${trash_count} items — size estimate only)"
   fi
