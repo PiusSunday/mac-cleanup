@@ -132,7 +132,14 @@ system::_ds_store() {
         (( skipped++ )) || true
       fi
     fi
-  done < <(find "$HOME" -maxdepth 4 -name ".DS_Store" -type f 2>/dev/null || true)
+  done < <(find "$HOME" \
+    -name ".DS_Store" \
+    -maxdepth 8 \
+    -not -path "$HOME/Library/Containers/*" \
+    -not -path "$HOME/.Trash/*" \
+    -not -path "*/node_modules/*" \
+    -not -path "*/.git/*" \
+    -type f 2>/dev/null || true)
 
   _SYS_DSSTORE_TOTAL=$total_bytes
 
@@ -153,27 +160,34 @@ system::_ds_store() {
 # ── d) Trash ─────────────────────────────────────────────────────────────────
 system::_trash() {
   _SYS_TRASH_TOTAL=0
-  local path="$HOME/.Trash"
-  if [[ ! -d "$path" ]]; then
+  local trash_dir="$HOME/.Trash"
+  local trash_size=0
+  local trash_count=0
+
+  # Count items (including hidden files, excluding . and ..)
+  trash_count=$(find "$trash_dir" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ') || trash_count=0
+
+  if (( trash_count == 0 )); then
     log::info "Trash: empty."
-    return 0
+    return
   fi
 
-  local size_bytes
-  size_bytes=$(utils::get_size_bytes "$path")
-  _SYS_TRASH_TOTAL=$size_bytes
+  # Get size before deletion so we can report it accurately
+  trash_size=$(utils::get_size_bytes "$trash_dir")
+  _SYS_TRASH_TOTAL=$trash_size
+  log::info "Trash: ${trash_count} items ($(utils::format_bytes "$trash_size"))"
 
-  if (( size_bytes == 0 )); then
-    log::info "Trash: empty."
-    return 0
-  fi
-
-  log::info "Trash: $(utils::format_bytes "$size_bytes")"
   if [[ "$DRY_RUN" == "true" ]]; then
-    log::info "[DRY-RUN] Would empty Trash via Finder"
+    log::info "[DRY-RUN] Would empty Trash (${trash_count} items)"
   else
-    utils::with_spinner "Emptying Trash via Finder..." \
-      osascript -e 'tell application "Finder" to empty trash'
+    # Use osascript for proper Finder integration (respects locked files)
+    if osascript -e 'tell application "Finder" to empty trash' 2>/dev/null; then
+      log::success "Trash emptied (${trash_count} items, $(utils::format_bytes "$trash_size") freed)"
+    else
+      # Fallback: direct deletion if Finder is not available
+      rm -rf "${trash_dir:?}/"* 2>/dev/null || true
+      log::success "Trash emptied (${trash_count} items)"
+    fi
   fi
 }
 

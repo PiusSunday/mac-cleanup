@@ -68,6 +68,10 @@ caches::_user_caches() {
     app_name=$(basename "$cache_dir")
     # Skip JetBrains — handled exclusively by caches::_jetbrains
     [[ "$app_name" == "JetBrains" ]] && continue
+    if ! utils::is_deletable "$cache_dir"; then
+      log::verbose "  Skipping protected: $(basename "$cache_dir")"
+      continue
+    fi
     if caches::_is_app_running "$app_name"; then
       log::verbose "Skipping active app cache: ${app_name}"
       continue
@@ -100,6 +104,10 @@ caches::_user_logs() {
   local size
   size=$(utils::format_bytes "$size_bytes")
   log::info "User logs: ${size}"
+  if ! utils::is_deletable "$path"; then
+    log::verbose "Skipping protected: ${path}"
+    return 0
+  fi
   dry_run_or_exec rm -rf "$path"
 }
 

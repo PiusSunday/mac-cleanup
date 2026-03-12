@@ -122,10 +122,39 @@ dry_run_or_exec() {
     return 0
   fi
   log::verbose "Executing: ${pretty_cmd}"
-  if ! "$@" 2>/dev/null; then
-    log::verbose "  ⚠ Permission denied: ${pretty_cmd}"
-    return 0
+  # Execute and capture stderr — only surface non-permission errors
+  local stderr_output
+  stderr_output=$("$@" 2>&1 >/dev/null) || {
+    if [[ "$stderr_output" != *"Operation not permitted"* && \
+          "$stderr_output" != *"Permission denied"* ]]; then
+      log::warn "Command failed: $stderr_output"
+    else
+      log::verbose "Skipped (permission denied): $pretty_cmd"
+    fi
+  }
+}
+
+# Returns 0 (true) if the path is safe to attempt deletion, 1 if it should be skipped
+utils::is_deletable() {
+  local target="$1"
+
+  # Check against SIP protected list
+  for protected in "${SIP_PROTECTED_PATHS[@]}"; do
+    if [[ "$target" == "$protected" || "$target" == "${protected}/"* ]]; then
+      log::verbose "Skipping SIP-protected path: ${target}"
+      return 1
+    fi
+  done
+
+  # Check write permission on the parent directory
+  local parent
+  parent="$(dirname "$target")"
+  if [[ ! -w "$parent" ]]; then
+    log::verbose "Skipping non-writable path: ${target}"
+    return 1
   fi
+
+  return 0
 }
 
 # ── Confirmation prompt ───────────────────────────────────────────────────────
