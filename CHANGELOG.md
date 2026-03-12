@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Trash detection now uses `find` to count items instead of `du` — fixes false "empty" reports when Trash contains files
+- Trash detection now uses Finder/osascript for item counting and size queries — fixes false "empty" reports caused by Terminal lacking Full Disk Access to read `~/.Trash`; omits size display when Finder returns 0 (known Finder quirk)
 - SIP-protected paths (`~/Library/Caches/com.apple.HomeKit`, `CloudKit`, etc.) are now excluded from deletion attempts — eliminates raw `rm:` permission errors in output
 - `.DS_Store` scan depth increased from 4 to 8 levels — finds files in deeper project directories; prunes `node_modules/`, `.git/`, and `Library/Containers/`
 - Added `SIP_PROTECTED_PATHS` exclusion list in `lib/core.sh` and `utils::is_deletable` guard in `lib/utils.sh`
