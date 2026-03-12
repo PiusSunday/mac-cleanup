@@ -16,7 +16,7 @@ jobs:
     name: Validate Payload
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install test dependencies
         run: brew install shellcheck bats-core
       - name: Run ShellCheck
@@ -34,7 +34,7 @@ jobs:
       sha256: ${{ steps.sha256.outputs.sha256 }}
       tag: ${{ steps.sha256.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Compute tarball SHA-256
         id: sha256
@@ -76,7 +76,7 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: PiusSunday/homebrew-mac-cleanup
           token: ${{ secrets.TAP_GITHUB_TOKEN }}
@@ -94,8 +94,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$FORMULA"
-          git commit -m "Bump mac-cleanup to ${TAG}"
-          git push
+          
+          # Skip commit if Formula is already up to date (e.g., manually updated)
+          if git diff --cached --quiet; then
+            echo "Formula already up to date — nothing to commit."
+          else
+            git commit -m "Bump mac-cleanup to ${TAG}"
+            git push
+          fi
 
   notify:
     name: Post Release Summary
