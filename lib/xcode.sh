@@ -104,10 +104,17 @@ xcode::_simulator_caches() {
 }
 
 xcode::_simulators() {
+  # Guard: simctl requires full Xcode, not just Command Line Tools
+  if ! xcrun --find simctl &>/dev/null 2>&1; then
+    log::info "simctl not available — skipping simulator cleanup."
+    return 0
+  fi
+
   log::info "Removing unavailable simulators..."
   if [[ "$DRY_RUN" == "true" ]]; then
     dry_run_or_exec xcrun simctl delete unavailable
   else
-    utils::with_spinner "Removing unavailable simulators..." xcrun simctl delete unavailable
+    utils::with_spinner "Removing unavailable simulators..." \
+      xcrun simctl delete unavailable
   fi
 }

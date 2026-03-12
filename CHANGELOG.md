@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-03-12
+
+### Fixed
+
+- `xcode::_simulators` now checks `xcrun --find simctl` before calling `simctl delete unavailable`, preventing exit code 72 crashes on machines without full Xcode
+- `brew::clean` cache detection uses explicit fallback when `brew --cache` returns empty or non-existent path, and logs the detected cache path and size
+- `system::_trash` uses disk delta measurement after emptying Trash to capture actual freed bytes when Finder reports 0 B (e.g., Terminal lacks Full Disk Access); includes APFS `sleep 1` for space reporting accuracy
+
 ## [0.3.0] - 2026-03-12
 
 ### Added

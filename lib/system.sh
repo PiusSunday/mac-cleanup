@@ -200,17 +200,45 @@ system::_trash() {
     return
   fi
 
+  # Capture disk state before emptying
+  local disk_before_trash
+  disk_before_trash=$(utils::get_free_bytes)
+
   # Empty via Finder — respects locked files and macOS conventions
   if _osascript_timed 10 -e 'tell application "Finder" to empty trash'; then
-    if (( trash_size > 0 )); then
-      log::success "Trash emptied (${trash_count} items, $(utils::format_bytes "$trash_size") freed)"
+    # Allow APFS to update free space reporting
+    sleep 1
+    local disk_after_trash
+    disk_after_trash=$(utils::get_free_bytes)
+    local disk_delta=$(( disk_after_trash - disk_before_trash ))
+    if (( disk_delta < 0 )); then disk_delta=0; fi
+
+    # Use whichever is larger: Finder-reported size or actual disk delta
+    local actual_freed=$(( trash_size > disk_delta ? trash_size : disk_delta ))
+    _SYS_TRASH_TOTAL=$actual_freed
+
+    if (( actual_freed > 0 )); then
+      log::success "Trash emptied (${trash_count} items, $(utils::format_bytes "$actual_freed") freed)"
     else
       log::success "Trash emptied (${trash_count} items)"
     fi
   else
     # Fallback: direct rm if Finder call fails or times out
+    local disk_before_fallback
+    disk_before_fallback=$(utils::get_free_bytes)
     rm -rf "${HOME}/.Trash/"* 2>/dev/null || true
-    log::success "Trash emptied (${trash_count} items — size estimate only)"
+    sleep 1
+    local disk_after_fallback
+    disk_after_fallback=$(utils::get_free_bytes)
+    local fallback_freed=$(( disk_after_fallback - disk_before_fallback ))
+    if (( fallback_freed < 0 )); then fallback_freed=0; fi
+    _SYS_TRASH_TOTAL=$fallback_freed
+
+    if (( fallback_freed > 0 )); then
+      log::success "Trash emptied (${trash_count} items, $(utils::format_bytes "$fallback_freed") freed)"
+    else
+      log::success "Trash emptied (${trash_count} items)"
+    fi
   fi
 }
 
