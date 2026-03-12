@@ -160,34 +160,38 @@ system::_ds_store() {
 # ── d) Trash ─────────────────────────────────────────────────────────────────
 system::_trash() {
   _SYS_TRASH_TOTAL=0
-  local trash_dir="$HOME/.Trash"
-  local trash_size=0
-  local trash_count=0
 
-  # Count items (including hidden files, excluding . and ..)
-  trash_count=$(find "$trash_dir" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ') || trash_count=0
+  # Query item count via Finder — works even without Terminal Full Disk Access
+  local trash_count=0
+  trash_count=$(osascript -e 'tell application "Finder" to count items in trash' 2>/dev/null) || trash_count=0
+  [[ "$trash_count" =~ ^[0-9]+$ ]] || trash_count=0
 
   if (( trash_count == 0 )); then
     log::info "Trash: empty."
     return
   fi
 
-  # Get size before deletion so we can report it accurately
-  trash_size=$(utils::get_size_bytes "$trash_dir")
+  # Query size via Finder before deletion
+  local trash_size_str
+  trash_size_str=$(osascript -e 'tell application "Finder" to get size of trash' 2>/dev/null) || trash_size_str=0
+  [[ "$trash_size_str" =~ ^[0-9]+$ ]] || trash_size_str=0
+  local trash_size=$(( trash_size_str ))
   _SYS_TRASH_TOTAL=$trash_size
+
   log::info "Trash: ${trash_count} items ($(utils::format_bytes "$trash_size"))"
 
   if [[ "$DRY_RUN" == "true" ]]; then
     log::info "[DRY-RUN] Would empty Trash (${trash_count} items)"
+    return
+  fi
+
+  # Empty via Finder — respects locked files and macOS conventions
+  if osascript -e 'tell application "Finder" to empty trash' 2>/dev/null; then
+    log::success "Trash emptied (${trash_count} items, $(utils::format_bytes "$trash_size") freed)"
   else
-    # Use osascript for proper Finder integration (respects locked files)
-    if osascript -e 'tell application "Finder" to empty trash' 2>/dev/null; then
-      log::success "Trash emptied (${trash_count} items, $(utils::format_bytes "$trash_size") freed)"
-    else
-      # Fallback: direct deletion if Finder is not available
-      rm -rf "${trash_dir:?}/"* 2>/dev/null || true
-      log::success "Trash emptied (${trash_count} items)"
-    fi
+    # Fallback: direct rm if Finder call fails
+    rm -rf "${HOME}/.Trash/"* 2>/dev/null || true
+    log::success "Trash emptied (${trash_count} items — size estimate only)"
   fi
 }
 
