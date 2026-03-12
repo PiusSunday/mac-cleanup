@@ -178,7 +178,11 @@ system::_trash() {
   local trash_size=$(( trash_size_str ))
   _SYS_TRASH_TOTAL=$trash_size
 
-  log::info "Trash: ${trash_count} items ($(utils::format_bytes "$trash_size"))"
+  if (( trash_size == 0 )); then
+    log::info "Trash: ${trash_count} items"
+  else
+    log::info "Trash: ${trash_count} items ($(utils::format_bytes "$trash_size"))"
+  fi
 
   if [[ "$DRY_RUN" == "true" ]]; then
     log::info "[DRY-RUN] Would empty Trash (${trash_count} items)"
@@ -187,7 +191,11 @@ system::_trash() {
 
   # Empty via Finder — respects locked files and macOS conventions
   if osascript -e 'tell application "Finder" to empty trash' 2>/dev/null; then
-    log::success "Trash emptied (${trash_count} items, $(utils::format_bytes "$trash_size") freed)"
+    if (( trash_size > 0 )); then
+      log::success "Trash emptied (${trash_count} items, $(utils::format_bytes "$trash_size") freed)"
+    else
+      log::success "Trash emptied (${trash_count} items)"
+    fi
   else
     # Fallback: direct rm if Finder call fails
     rm -rf "${HOME}/.Trash/"* 2>/dev/null || true
