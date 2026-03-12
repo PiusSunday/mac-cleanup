@@ -3,15 +3,33 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      - "v*.*.*"
 
 permissions:
   contents: write
 
 jobs:
+  validate:
+    name: Validate Payload
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test dependencies
+        run: brew install shellcheck bats-core
+      - name: Run ShellCheck
+        run: shellcheck lib/*.sh bin/mac-cleanup
+      - name: Run Bats Tests
+        run: bats tests/
+      - name: Run Smoke Tests
+        run: bash tests/smoke_test.sh
+
   release:
     name: Create GitHub Release
+    needs: validate
     runs-on: ubuntu-latest
+    outputs:
+      sha256: ${{ steps.sha256.outputs.sha256 }}
+      tag: ${{ steps.sha256.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -19,8 +37,10 @@ jobs:
         id: sha256
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
-          URL="https://github.com/${{ github.repository }}/archive/${TAG}.tar.gz"
-          SHA=$(curl -sL "$URL" | shasum -a 256 | awk '{print $1}')
+          URL="https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz"
+          # Wait briefly for GitHub archive cache to stabilize if needed
+          sleep 5
+          SHA=$(curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$URL" | shasum -a 256 | awk '{print $1}')
           echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Tarball SHA-256: $SHA"
@@ -48,4 +68,40 @@ jobs:
             ${{ steps.sha256.outputs.sha256 }}
             ```
 
-            Update `Formula/mac-cleanup.rb` with this checksum.
+  update-tap:
+    name: Update Homebrew Tap
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: PiusSunday/homebrew-mac-cleanup
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+
+      - name: Update Formula
+        run: |
+          TAG="${{ needs.release.outputs.tag }}"
+          SHA="${{ needs.release.outputs.sha256 }}"
+          FORMULA="Formula/mac-cleanup.rb"
+          
+          # Replace url and sha256
+          sed -i "s|url \".*\"|url \"https://github.com/PiusSunday/mac-cleanup/archive/refs/tags/${TAG}.tar.gz\"|" "$FORMULA"
+          sed -i "s/sha256 \".*\"/sha256 \"${SHA}\"/" "$FORMULA"
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$FORMULA"
+          git commit -m "Bump mac-cleanup to ${TAG}"
+          git push
+
+  notify:
+    name: Post Release Summary
+    needs: [release, update-tap]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write Summary
+        run: |
+          echo "### 🚀 Release Successfully Published!" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ needs.release.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **SHA-256:** \`${{ needs.release.outputs.sha256 }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Homebrew Tap:** Updated automatically via formula push." >> $GITHUB_STEP_SUMMARY

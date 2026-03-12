@@ -92,6 +92,26 @@ Never add code that:
 - Runs destructive operations without going through `dry_run_or_exec`
 - Auto-deletes anything in "System Data clues" — those are informational only
 
+## Releasing a New Version
+
+mac-cleanup uses an automated GitHub Actions workflow for releases. To publish a new version:
+
+1. Update the `VERSION` variable in `lib/core.sh`.
+2. Update `CHANGELOG.md` with the new version notes.
+3. Merge all changes into the `main` branch.
+4. Create and push a new Git tag matching the version (e.g., `v0.2.1`):
+   ```bash
+   git tag v0.2.1
+   git push origin v0.2.1
+   ```
+
+Pushing the tag triggers the Release workflow, which automatically runs validations, creates a GitHub Release with the tarball SHA-256, and updates the Homebrew tap.
+
+### Required Secrets
+
+The release workflow requires the following repository secret in GitHub Settings:
+- `TAP_GITHUB_TOKEN`: A Personal Access Token (PAT) with `repo` scope, used to automatically push Formula updates to the `homebrew-mac-cleanup` tap repository.
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the MIT License.
