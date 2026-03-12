@@ -12,13 +12,21 @@ brew::clean() {
   local disk_before
   disk_before=$(utils::get_free_bytes)
 
-  # Estimate scanned size from Homebrew cache
+  # Measure cache size before cleanup — use brew --cache with fallback
   local brew_cache_size=0
   local brew_cache_dir
-  brew_cache_dir="$(brew --cache 2>/dev/null || echo "$HOME/Library/Caches/Homebrew")"
+  brew_cache_dir="$(brew --cache 2>/dev/null)" || brew_cache_dir=""
+
+  # Fallback to known default if brew --cache fails or returns empty
+  if [[ -z "$brew_cache_dir" || ! -d "$brew_cache_dir" ]]; then
+    brew_cache_dir="$HOME/Library/Caches/Homebrew"
+  fi
+
   if [[ -d "$brew_cache_dir" ]]; then
     brew_cache_size=$(utils::get_size_bytes "$brew_cache_dir")
   fi
+
+  log::info "Homebrew cache: $(utils::format_bytes "$brew_cache_size") at ${brew_cache_dir}"
 
   if [[ "$DRY_RUN" == "true" ]]; then
     log::info "[DRY-RUN] Would run: brew cleanup --prune=all"
