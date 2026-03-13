@@ -1,9 +1,55 @@
 # Changelog
 
+<!-- markdownlint-disable MD024 -->
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.4.0] - 2026-03-13
+
+### Added
+
+- New safety-first preflight module (`lib/preflight.sh`) with checks for free disk space, Time Machine active backup state, battery level, and SIP status
+- New deep system cleanup module (`lib/system_deep.sh`) for age-gated cleanup of unified logs, power logs, memory exception reports, rotated system logs, stale installer leftovers, broken user preferences, and Safari content cache
+- New orphan detection module (`lib/orphans.sh`) that automatically scans for stale app data in Application Support, Containers, and Preferences; deletion is opt-in via `--clean-orphans`
+- New mail cleanup module (`lib/mail.sh`) for old Mail Downloads and shared recent-item metadata
+- New DevOps reset module (`lib/devops_reset.sh`) with broad ecosystem cleanup across Docker, Node, Python, Ruby, Java, Rust, and optional model caches via `--include-ml-models`
+- New CLI flags:
+  - `--system-deep` / `-z`
+  - `--mail` / `-m`
+  - `--clean-orphans`
+  - `--devops-reset`
+  - `--include-ml-models`
+  - `--show-log`
+- New operation log viewer command path through `--show-log`
+- New tests:
+  - `tests/test_preflight.bats`
+  - `tests/test_orphans.bats`
+  - `tests/test_system_deep.bats`
+
+### Changed
+
+- Centralized file deletion through hardened `safe_rm` primitives in `lib/utils.sh`
+- Added configurable whitelist loading (`~/.config/mac-cleanup/whitelist`) with safe defaults for sensitive/system-impacting cache paths
+- Added operation log recording to `~/.mac-cleanup/operations.log`
+- Dry-run accounting now tracks measured deletion candidates via `TOTAL_DRYRUN_BYTES`
+- `system.sh`, `caches.sh`, `devtools.sh`, and `xcode.sh` now use centralized safe deletion flow
+- Docker cleanup moved from broad prune approach to precision cleanup by explicit IDs/names
+- `devtools.sh` exclusion builder no longer uses `eval`
+
+### Fixed
+
+- `caches::_user_logs` now deletes contents safely instead of removing the whole log directory root
+- Container cleanup in caches module narrowed to cache/temp paths instead of broad container root deletion
+- Added deeper and safer Xcode cleanup targets (documentation cache/index and device/core simulator logs)
+- Expanded SIP-protected path list in core safeguards
+
+### Test
+
+- BATS suite passing: 63 tests, 0 failures
+- Smoke test script passing end-to-end (`tests/smoke_test.sh`)
 
 ## [0.3.1] - 2026-03-12
 
