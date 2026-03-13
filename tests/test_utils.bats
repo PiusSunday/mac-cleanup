@@ -69,6 +69,39 @@ teardown() {
   [[ "$output" == *"DRY-RUN"* ]]
 }
 
+# ── safe_rm ─────────────────────────────────────────────────────────────────
+
+@test "safe_rm: rejects relative paths" {
+  DRY_RUN=true
+  run safe_rm "relative/path"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"relative path rejected"* ]]
+}
+
+@test "safe_rm: dry-run does not delete and updates TOTAL_DRYRUN_BYTES" {
+  DRY_RUN=true
+  TOTAL_DRYRUN_BYTES=0
+  local target_dir="${BATS_TEST_TMPDIR}/safe_rm_dry_dir"
+  mkdir -p "$target_dir"
+  echo "payload" > "$target_dir/file.txt"
+
+  safe_rm "$target_dir" "test dir"
+  [ -d "$target_dir" ]
+  [ "$TOTAL_DRYRUN_BYTES" -gt 0 ]
+}
+
+@test "safe_rm: live mode deletes target and updates TOTAL_FREED" {
+  DRY_RUN=false
+  TOTAL_FREED=0
+  local target_dir="${BATS_TEST_TMPDIR}/safe_rm_live_dir"
+  mkdir -p "$target_dir"
+  echo "payload" > "$target_dir/file.txt"
+
+  safe_rm "$target_dir" "live dir"
+  [ ! -e "$target_dir" ]
+  [ "$TOTAL_FREED" -gt 0 ]
+}
+
 # ── utils::require ────────────────────────────────────────────────────────────
 
 @test "utils::require: returns 0 for existing command" {
