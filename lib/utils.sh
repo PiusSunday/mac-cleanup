@@ -31,6 +31,12 @@ INFO="ℹ"
 WARN="⚠"
 TRASH="🗑"
 
+# ── v0.4.0 safety primitives ────────────────────────────────────────────────
+WHITELIST_FILE="${WHITELIST_FILE:-$HOME/.config/mac-cleanup/whitelist}"
+OPLOG_FILE="${OPLOG_FILE:-$HOME/.mac-cleanup/operations.log}"
+
+declare -a WHITELIST_PATTERNS=()
+
 # ── Internal log-to-file helper ───────────────────────────────────────────────
 _log_to_file() {
   local level="$1"
@@ -38,6 +44,15 @@ _log_to_file() {
   mkdir -p "$(dirname "$LOG_FILE")"
   printf "[%s] [%-8s] %s\n" \
     "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$message" >> "$LOG_FILE"
+}
+
+_oplog() {
+  local action="$1"
+  local path="$2"
+  local size="$3"
+  mkdir -p "$(dirname "$OPLOG_FILE")"
+  printf "[%s] [%s] %s (%s)\n" \
+    "$(date '+%Y-%m-%dT%H:%M:%S')" "$action" "$path" "$size" >> "$OPLOG_FILE"
 }
 
 # ── Logging functions ─────────────────────────────────────────────────────────
@@ -92,6 +107,23 @@ utils::get_size_bytes() {
   echo $((size * 1024))
 }
 
+utils::realpath() {
+  local path="$1"
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$path" 2>/dev/null && return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$path" 2>/dev/null && return 0
+  fi
+  if [[ -e "$path" ]]; then
+    local dir base
+    dir="$(dirname "$path")"
+    base="$(basename "$path")"
+    (cd "$dir" 2>/dev/null && printf "%s/%s\n" "$(pwd -P)" "$base") && return 0
+  fi
+  return 1
+}
+
 # Get free disk bytes on /
 utils::get_free_bytes() {
   df -k / | awk 'NR==2 {print $4 * 1024}'
@@ -109,6 +141,149 @@ utils::format_bytes() {
   else
     printf "%d B" "$bytes"
   fi
+}
+
+utils::load_whitelist() {
+  WHITELIST_PATTERNS=(
+    "$HOME/Library/Caches/com.apple.FontRegistry"
+    "$HOME/Library/Caches/com.apple.Spotlight"
+    "$HOME/Library/Caches/com.apple.spotlight"
+    "$HOME/Library/Caches/CloudKit"
+    "$HOME/Library/Caches/com.apple.finder"
+    "$HOME/Library/Mobile Documents"
+    "$HOME/.ollama/models"
+    "$HOME/.cache/huggingface"
+  )
+
+  if [[ -f "$WHITELIST_FILE" ]]; then
+    while IFS= read -r line; do
+      [[ -z "$line" || "$line" == \#* ]] && continue
+      line="${line/#\~/$HOME}"
+      WHITELIST_PATTERNS+=("$line")
+    done < "$WHITELIST_FILE"
+  fi
+}
+
+utils::is_whitelisted() {
+  local path="$1"
+  local pattern
+  for pattern in "${WHITELIST_PATTERNS[@]}"; do
+    if [[ "$path" == "$pattern" || "$path" == "${pattern}/"* ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+_safe_rm_check_system_path() {
+  local p="$1"
+  case "$p" in
+    /|/System|/System/*|/bin|/bin/*|/sbin|/sbin/*|/usr/bin|/usr/bin/*|/usr/sbin|/usr/sbin/*|/usr/lib|/usr/lib/*|/etc|/etc/*|/private/etc|/private/etc/*|/Library/Extensions|/Library/Extensions/*)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+safe_rm() {
+  local path="$1"
+  local label="${2:-$path}"
+  local mode="${3:-normal}"
+
+  if [[ -z "$path" ]]; then
+    log::warn "safe_rm: empty path rejected"
+    return 1
+  fi
+
+  if [[ "$path" != /* ]]; then
+    log::warn "safe_rm: relative path rejected: $path"
+    return 1
+  fi
+
+  if [[ "$path" =~ (^|/)\.\.(/|$) ]]; then
+    log::error "safe_rm: path traversal rejected: $path"
+    return 1
+  fi
+
+  if [[ "$path" == *$'\n'* ]]; then
+    log::error "safe_rm: control character rejected"
+    return 1
+  fi
+
+  local resolved="$path"
+  if [[ -L "$path" ]]; then
+    resolved="$(utils::realpath "$path" || echo "")"
+    if [[ -z "$resolved" ]]; then
+      log::warn "safe_rm: unresolved symlink rejected: $path"
+      return 1
+    fi
+  fi
+
+  if ! _safe_rm_check_system_path "$resolved"; then
+    log::warn "safe_rm: protected system path rejected: $resolved"
+    return 1
+  fi
+
+  if [[ "$mode" != "force" ]] && utils::is_whitelisted "$resolved"; then
+    log::verbose "safe_rm: whitelisted path skipped: $resolved"
+    _oplog "SKIPPED" "$resolved" "whitelist"
+    return 0
+  fi
+
+  local parent
+  parent="$(dirname "$resolved")"
+  if [[ ! -w "$parent" ]]; then
+    log::verbose "safe_rm: non-writable path skipped: $resolved"
+    _oplog "SKIPPED" "$resolved" "permission"
+    return 1
+  fi
+
+  if [[ ! -e "$resolved" ]]; then
+    return 0
+  fi
+
+  local bytes
+  bytes=$(utils::get_size_bytes "$resolved")
+  local bytes_fmt
+  bytes_fmt=$(utils::format_bytes "$bytes")
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    TOTAL_DRYRUN_BYTES=$(( TOTAL_DRYRUN_BYTES + bytes ))
+    log::info "[DRY-RUN] ${bytes_fmt} ${label}"
+    _oplog "DRYRUN" "$resolved" "$bytes_fmt"
+    return 0
+  fi
+
+  rm -rf -- "$resolved" 2>/dev/null || {
+    log::verbose "safe_rm: deletion failed: $resolved"
+    _oplog "SKIPPED" "$resolved" "delete-failed"
+    return 1
+  }
+
+  TOTAL_FREED=$(( TOTAL_FREED + bytes ))
+  log::success "${label} ($(utils::format_bytes "$bytes"))"
+  _oplog "REMOVED" "$resolved" "$bytes_fmt"
+  return 0
+}
+
+safe_rm_contents() {
+  local dir="$1"
+  local label_prefix="${2:-$dir}"
+  [[ -d "$dir" ]] || return 0
+  while IFS= read -r item; do
+    safe_rm "$item" "${label_prefix}: $(basename "$item")"
+  done < <(find "$dir" -mindepth 1 -maxdepth 1 2>/dev/null || true)
+}
+
+safe_rm_cmd() {
+  local pretty_cmd
+  pretty_cmd="$(printf "%q " "$@")"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    log::info "[DRY-RUN] Would execute: ${pretty_cmd}"
+    _oplog "DRYRUN" "$pretty_cmd" "command"
+    return 0
+  fi
+  "$@"
 }
 
 # ── Dry-run handler ───────────────────────────────────────────────────────────
@@ -138,6 +313,20 @@ dry_run_or_exec() {
 utils::is_deletable() {
   local target="$1"
 
+  if [[ "$target" != /* ]]; then
+    return 1
+  fi
+
+  if ! _safe_rm_check_system_path "$target"; then
+    log::verbose "Skipping protected path: ${target}"
+    return 1
+  fi
+
+  if utils::is_whitelisted "$target"; then
+    log::verbose "Skipping whitelisted path: ${target}"
+    return 1
+  fi
+
   # Check against SIP protected list
   for protected in "${SIP_PROTECTED_PATHS[@]}"; do
     if [[ "$target" == "$protected" || "$target" == "${protected}/"* ]]; then
@@ -155,6 +344,14 @@ utils::is_deletable() {
   fi
 
   return 0
+}
+
+utils::show_operation_log() {
+  if [[ ! -f "$OPLOG_FILE" ]]; then
+    log::info "No operation log found at ${OPLOG_FILE}"
+    return 0
+  fi
+  cat "$OPLOG_FILE"
 }
 
 # ── Confirmation prompt ───────────────────────────────────────────────────────
