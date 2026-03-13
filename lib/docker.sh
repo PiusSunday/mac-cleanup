@@ -51,6 +51,7 @@ docker::clean() {
 
   docker::_containers
   docker::_images
+  docker::_volumes
   docker::_build_cache
 
   local disk_after
@@ -70,36 +71,35 @@ docker::clean() {
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 docker::_containers() {
-  log::info "Removing stopped containers..."
-  if [[ "$DRY_RUN" == "true" ]]; then
-    dry_run_or_exec docker container prune -f
-  else
-    utils::with_spinner "Removing stopped containers..." docker container prune -f
-  fi
+  log::info "Removing stopped containers by ID..."
+  local cid
+  while IFS= read -r cid; do
+    [[ -n "$cid" ]] || continue
+    safe_rm_cmd docker rm "$cid" || true
+  done < <(docker ps -a --filter status=exited --format '{{.ID}}' 2>/dev/null || true)
 }
 
 docker::_images() {
-  log::info "Removing dangling images..."
-  if [[ "$DRY_RUN" == "true" ]]; then
-    dry_run_or_exec docker image prune -f
-  else
-    utils::with_spinner "Removing dangling images..." docker image prune -f
-  fi
-  log::info "Removing unused images..."
-  if [[ "$DRY_RUN" == "true" ]]; then
-    dry_run_or_exec docker image prune -af
-  else
-    utils::with_spinner "Removing unused images..." docker image prune -af
-  fi
+  log::info "Removing dangling images by ID..."
+  local iid
+  while IFS= read -r iid; do
+    [[ -n "$iid" ]] || continue
+    safe_rm_cmd docker rmi "$iid" || true
+  done < <(docker images -f dangling=true --format '{{.ID}}' 2>/dev/null || true)
+}
+
+docker::_volumes() {
+  log::info "Removing dangling volumes by name..."
+  local vol
+  while IFS= read -r vol; do
+    [[ -n "$vol" ]] || continue
+    safe_rm_cmd docker volume rm "$vol" || true
+  done < <(docker volume ls -qf dangling=true 2>/dev/null || true)
 }
 
 docker::_build_cache() {
   log::info "Removing Docker build cache..."
-  if [[ "$DRY_RUN" == "true" ]]; then
-    dry_run_or_exec docker builder prune -af
-  else
-    utils::with_spinner "Removing Docker build cache..." docker builder prune -af
-  fi
+  safe_rm_cmd docker builder prune -af || true
 }
 
 # Report current Docker disk usage (informational only)

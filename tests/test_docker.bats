@@ -47,6 +47,20 @@ teardown() {
 
 @test "docker::_containers: outputs DRY-RUN message when DRY_RUN=true" {
   DRY_RUN=true
+  docker() {
+    case "$1" in
+      ps)
+        echo "abc123"
+        return 0
+        ;;
+      rm)
+        return 0
+        ;;
+    esac
+    return 0
+  }
+  export -f docker
+
   run docker::_containers
   [ "$status" -eq 0 ]
   [[ "$output" == *"DRY-RUN"* ]]
@@ -54,6 +68,20 @@ teardown() {
 
 @test "docker::_images: outputs DRY-RUN message when DRY_RUN=true" {
   DRY_RUN=true
+  docker() {
+    case "$1" in
+      images)
+        echo "img123"
+        return 0
+        ;;
+      rmi)
+        return 0
+        ;;
+    esac
+    return 0
+  }
+  export -f docker
+
   run docker::_images
   [ "$status" -eq 0 ]
   [[ "$output" == *"DRY-RUN"* ]]

@@ -18,6 +18,8 @@ xcode::clean() {
   xcode::_device_support
   xcode::_simulator_caches
   xcode::_simulators
+  xcode::_documentation_cache
+  xcode::_device_logs
 
   local disk_after
   disk_after=$(utils::get_free_bytes)
@@ -50,7 +52,7 @@ xcode::_derived_data() {
   local size
   size=$(utils::format_bytes "$size_bytes")
   log::info "DerivedData: ${size}"
-  dry_run_or_exec rm -rf "$path"
+  safe_rm "$path" "Xcode DerivedData"
 }
 
 xcode::_archives() {
@@ -69,7 +71,7 @@ xcode::_archives() {
   # Only remove archives older than 90 days by default
   log::info "Removing Xcode archives older than 90 days..."
   while IFS= read -r archive; do
-    dry_run_or_exec rm -rf "$archive"
+    safe_rm "$archive" "Xcode archive"
   done < <(find "$path" -name "*.xcarchive" -mtime +90 -print 2>/dev/null || true)
 }
 
@@ -85,7 +87,7 @@ xcode::_device_support() {
   local size
   size=$(utils::format_bytes "$size_bytes")
   log::info "iOS DeviceSupport: ${size}"
-  dry_run_or_exec rm -rf "$path"
+  safe_rm "$path" "Xcode DeviceSupport"
 }
 
 xcode::_simulator_caches() {
@@ -100,7 +102,7 @@ xcode::_simulator_caches() {
   local size
   size=$(utils::format_bytes "$size_bytes")
   log::info "Simulator caches: ${size}"
-  dry_run_or_exec rm -rf "$path"
+  safe_rm "$path" "CoreSimulator caches"
 }
 
 xcode::_simulators() {
@@ -117,4 +119,36 @@ xcode::_simulators() {
     utils::with_spinner "Removing unavailable simulators..." \
       xcrun simctl delete unavailable
   fi
+}
+
+xcode::_documentation_cache() {
+  local -a doc_paths=(
+    "$HOME/Library/Developer/Xcode/DocumentationCache"
+    "$HOME/Library/Developer/Xcode/DocumentationIndex"
+  )
+  local p
+  for p in "${doc_paths[@]}"; do
+    [[ -d "$p" ]] || continue
+    local size
+    size=$(utils::get_size_bytes "$p")
+    MODULE_XCODE_SCANNED=$(( MODULE_XCODE_SCANNED + size ))
+    safe_rm "$p" "Xcode $(basename "$p")"
+  done
+}
+
+xcode::_device_logs() {
+  local -a log_paths=(
+    "$HOME/Library/Developer/Xcode/iOS Device Logs"
+    "$HOME/Library/Developer/Xcode/watchOS Device Logs"
+    "$HOME/Library/Logs/CoreSimulator"
+    "$HOME/Library/Developer/Xcode/Products"
+  )
+  local p
+  for p in "${log_paths[@]}"; do
+    [[ -d "$p" ]] || continue
+    local size
+    size=$(utils::get_size_bytes "$p")
+    MODULE_XCODE_SCANNED=$(( MODULE_XCODE_SCANNED + size ))
+    safe_rm "$p" "Xcode $(basename "$p")"
+  done
 }

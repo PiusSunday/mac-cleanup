@@ -15,8 +15,6 @@ system::clean() {
   system::_crash_reports
   module_scanned=$(( module_scanned + _SYS_CRASH_TOTAL ))
 
-  system::_system_logs
-
   system::_ds_store
   module_scanned=$(( module_scanned + _SYS_DSSTORE_TOTAL ))
 
@@ -80,7 +78,7 @@ system::_crash_reports() {
       fbytes=$(utils::get_size_bytes "$file")
       dir_bytes=$(( dir_bytes + fbytes ))
       (( count++ )) || true
-      dry_run_or_exec rm -f "$file"
+      safe_rm "$file" "Crash report"
     done < <(find "$path" -maxdepth 1 \( -name "*.crash" -o -name "*.ips" -o -name "*.hang" \) -type f 2>/dev/null || true)
 
     total_count=$(( total_count + count ))
@@ -96,22 +94,7 @@ system::_crash_reports() {
   fi
 }
 
-# ── b) System logs ───────────────────────────────────────────────────────────
-system::_system_logs() {
-  local path="/private/var/log"
-  if [[ ! -r "$path" ]]; then
-    log::info "System logs: not accessible (requires sudo) — skipping."
-    return 0
-  fi
-
-  local size_bytes
-  size_bytes=$(utils::get_size_bytes "$path")
-  local size_fmt
-  size_fmt=$(utils::format_bytes "$size_bytes")
-  log::info "System logs: ${size_fmt} (read-only report — cleaning via this tool is not supported)"
-}
-
-# ── c) .DS_Store files ───────────────────────────────────────────────────────
+# ── b) .DS_Store files ───────────────────────────────────────────────────────
 system::_ds_store() {
   _SYS_DSSTORE_TOTAL=0
   log::info "Scanning for .DS_Store files..."
@@ -124,14 +107,9 @@ system::_ds_store() {
     fbytes=$(utils::get_size_bytes "$file")
     total_bytes=$(( total_bytes + fbytes ))
     (( count++ )) || true
-    if [[ "$DRY_RUN" == "true" ]]; then
-      log::info "[DRY-RUN] Would execute: rm -f ${file}"
-    else
-      if ! rm -f "$file" 2>/dev/null; then
-        log::verbose "  Skipped (permission denied): $file"
-        (( skipped++ )) || true
-        total_bytes=$(( total_bytes - fbytes ))
-      fi
+    if ! safe_rm "$file" ".DS_Store"; then
+      (( skipped++ )) || true
+      total_bytes=$(( total_bytes - fbytes ))
     fi
   done < <(find "$HOME" \
     -name ".DS_Store" \
@@ -158,7 +136,7 @@ system::_ds_store() {
   fi
 }
 
-# ── d) Trash ─────────────────────────────────────────────────────────────────
+# ── c) Trash ─────────────────────────────────────────────────────────────────
 
 # Run osascript with a timeout (seconds). Returns 1 on timeout or failure.
 # Uses perl alarm() — available on all macOS versions, no background processes.
@@ -223,10 +201,10 @@ system::_trash() {
       log::success "Trash emptied (${trash_count} items)"
     fi
   else
-    # Fallback: direct rm if Finder call fails or times out
+    # Fallback: direct delete if Finder call fails or times out
     local disk_before_fallback
     disk_before_fallback=$(utils::get_free_bytes)
-    rm -rf "${HOME}/.Trash/"* 2>/dev/null || true
+    safe_rm_contents "${HOME}/.Trash" "Trash"
     sleep 1
     local disk_after_fallback
     disk_after_fallback=$(utils::get_free_bytes)
@@ -242,7 +220,7 @@ system::_trash() {
   fi
 }
 
-# ── e) Developer tool caches ─────────────────────────────────────────────────
+# ── d) Developer tool caches ─────────────────────────────────────────────────
 system::_dev_tool_caches() {
   _SYS_DEVCACHE_TOTAL=0
 
@@ -253,7 +231,7 @@ system::_dev_tool_caches() {
     npm_bytes=$(utils::get_size_bytes "$npm_cache")
     _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + npm_bytes ))
     log::info "npm cache: $(utils::format_bytes "$npm_bytes")"
-    dry_run_or_exec rm -rf "$npm_cache"
+    safe_rm "$npm_cache" "npm cache"
   else
     log::verbose "npm cache not found — skipping."
   fi
@@ -266,7 +244,7 @@ system::_dev_tool_caches() {
     if (( npx_bytes > 0 )); then
       _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + npx_bytes ))
       log::info "npm npx cache: $(utils::format_bytes "$npx_bytes")"
-      dry_run_or_exec rm -rf "$npx_cache"
+      safe_rm "$npx_cache" "npm npx cache"
     fi
   fi
 
@@ -278,7 +256,7 @@ system::_dev_tool_caches() {
     if (( npm_logs_bytes > 0 )); then
       _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + npm_logs_bytes ))
       log::info "npm logs: $(utils::format_bytes "$npm_logs_bytes")"
-      dry_run_or_exec rm -rf "$npm_logs"
+      safe_rm "$npm_logs" "npm logs"
     fi
   fi
 
@@ -289,7 +267,7 @@ system::_dev_tool_caches() {
     pip_bytes=$(utils::get_size_bytes "$pip_cache")
     _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + pip_bytes ))
     log::info "pip cache: $(utils::format_bytes "$pip_bytes")"
-    dry_run_or_exec rm -rf "$pip_cache"
+    safe_rm "$pip_cache" "pip cache"
   else
     log::verbose "pip cache not found — skipping."
   fi
@@ -317,7 +295,7 @@ system::_dev_tool_caches() {
     if (( gcloud_logs_bytes > 0 )); then
       _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + gcloud_logs_bytes ))
       log::info "Google Cloud logs: $(utils::format_bytes "$gcloud_logs_bytes")"
-      dry_run_or_exec rm -rf "$gcloud_logs"
+      safe_rm "$gcloud_logs" "Google Cloud logs"
     fi
   fi
 
@@ -329,7 +307,7 @@ system::_dev_tool_caches() {
     if (( gcloud_cache_bytes > 0 )); then
       _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + gcloud_cache_bytes ))
       log::info "Google Cloud cache: $(utils::format_bytes "$gcloud_cache_bytes")"
-      dry_run_or_exec rm -rf "$gcloud_cache"
+      safe_rm "$gcloud_cache" "Google Cloud cache"
     fi
   fi
 
@@ -341,7 +319,7 @@ system::_dev_tool_caches() {
     if (( kube_bytes > 0 )); then
       _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + kube_bytes ))
       log::info "Kubernetes cache: $(utils::format_bytes "$kube_bytes")"
-      dry_run_or_exec rm -rf "$kube_cache"
+      safe_rm "$kube_cache" "Kubernetes cache"
     fi
   fi
 
@@ -353,12 +331,12 @@ system::_dev_tool_caches() {
     if (( aws_bytes > 0 )); then
       _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + aws_bytes ))
       log::info "AWS CLI cache: $(utils::format_bytes "$aws_bytes")"
-      dry_run_or_exec rm -rf "$aws_cache"
+      safe_rm "$aws_cache" "AWS CLI cache"
     fi
   fi
 }
 
-# ── f) System Data clues (informational only — NEVER delete) ─────────────────
+# ── e) System Data clues (informational only — NEVER delete) ─────────────────
 system::_system_data_clues() {
   _SYS_HAS_CLUES=false
   local found_any=false

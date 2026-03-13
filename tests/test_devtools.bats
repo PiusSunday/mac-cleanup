@@ -24,11 +24,10 @@ setup() {
   DEVTOOLS_EXCLUDE_PATHS=()
 
   _DEV_NODE_TOTAL=0
-  local output
-  output=$(devtools::_node_modules 2>&1)
+  devtools::_node_modules > /dev/null 2>&1
 
   export HOME="$old_home"
-  [[ "$output" == *"Orphaned"* ]]
+  [ "$_DEV_NODE_TOTAL" -gt 0 ]
 }
 
 @test "devtools::_node_modules: does not count active node_modules" {

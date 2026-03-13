@@ -36,6 +36,12 @@ caches::clean() {
   caches::_spotify
   module_scanned=$(( module_scanned + _CACHES_SPOTIFY_TOTAL ))
 
+  caches::_podcasts
+  module_scanned=$(( module_scanned + _CACHES_PODCASTS_TOTAL ))
+
+  caches::_apple_media
+  module_scanned=$(( module_scanned + _CACHES_APPLEMEDIA_TOTAL ))
+
   caches::_jetbrains
   module_scanned=$(( module_scanned + _CACHES_JETBRAINS_TOTAL ))
 
@@ -66,6 +72,8 @@ _CACHES_APPSUPPORT_TOTAL=0
 _CACHES_ZSH_TOTAL=0
 _CACHES_SPOTIFY_TOTAL=0
 _CACHES_JETBRAINS_TOTAL=0
+_CACHES_PODCASTS_TOTAL=0
+_CACHES_APPLEMEDIA_TOTAL=0
 
 caches::_user_caches() {
   _CACHES_USER_TOTAL=0
@@ -98,7 +106,7 @@ caches::_user_caches() {
     local size_fmt
     size_fmt=$(utils::format_bytes "$size_bytes")
     log::info "  ${ARROW} ${size_fmt}  ${cache_dir}"
-    dry_run_or_exec rm -rf "$cache_dir"
+    safe_rm "$cache_dir" "User cache: ${app_name}"
   done < <(find "$path" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true)
 
   _CACHES_USER_TOTAL=$total
@@ -124,7 +132,7 @@ caches::_user_logs() {
     log::verbose "Skipping protected: ${path}"
     return 0
   fi
-  dry_run_or_exec rm -rf "$path"
+  safe_rm_contents "$path" "User logs"
 }
 
 caches::_app_support_caches() {
@@ -149,7 +157,7 @@ caches::_app_support_caches() {
     local size_fmt
     size_fmt=$(utils::format_bytes "$size_bytes")
     log::info "  ${ARROW} ${size_fmt}  ${cache_dir}"
-    dry_run_or_exec rm -rf "$cache_dir"
+    safe_rm "$cache_dir" "App Support Cache: ${app_name}"
   done < <(find "$base" -mindepth 2 -maxdepth 2 -type d -name "Cache" 2>/dev/null || true)
   _CACHES_APPSUPPORT_TOTAL=$total
 }
@@ -207,7 +215,7 @@ caches::_browsers() {
     size=$(utils::get_size_bytes "$cache_path")
     if (( size > 0 )); then
       log::info "  ${label}: $(utils::format_bytes "$size")"
-      dry_run_or_exec rm -rf "$cache_path"
+      safe_rm "$cache_path" "$label"
       total=$(( total + size ))
     fi
   done
@@ -233,24 +241,31 @@ caches::_containers() {
     # Never touch Apple system containers
     [[ "$bundle_id" == com.apple.* ]] && continue
 
-    local cache_dir="${container_dir}/Data/Library/Caches"
-    [[ -d "$cache_dir" ]] || continue
+    local -a candidate_dirs=(
+      "${container_dir}/Data/Library/Caches"
+      "${container_dir}/Data/tmp"
+    )
 
-    utils::is_deletable "$cache_dir" || continue
+    local cache_dir
+    for cache_dir in "${candidate_dirs[@]}"; do
+      [[ -d "$cache_dir" ]] || continue
 
-    # Skip if the owning app is currently running
-    if pgrep -xi "$bundle_id" &>/dev/null; then
-      log::verbose "  Skipping container cache (app running): ${bundle_id}"
-      continue
-    fi
+      utils::is_deletable "$cache_dir" || continue
 
-    local size
-    size=$(utils::get_size_bytes "$cache_dir")
-    (( size > 0 )) || continue
+      # Skip if the owning app is currently running
+      if pgrep -xi "$bundle_id" &>/dev/null; then
+        log::verbose "  Skipping container cache (app running): ${bundle_id}"
+        continue
+      fi
 
-    log::verbose "  Container cache: ${bundle_id} ($(utils::format_bytes "$size"))"
-    dry_run_or_exec rm -rf "$cache_dir"
-    total=$(( total + size ))
+      local size
+      size=$(utils::get_size_bytes "$cache_dir")
+      (( size > 0 )) || continue
+
+      log::verbose "  Container cache: ${bundle_id} ($(utils::format_bytes "$size"))"
+      safe_rm "$cache_dir" "Container cache: ${bundle_id}"
+      total=$(( total + size ))
+    done
   done < <(find "$containers_dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true)
 
   _CACHES_CONTAINERS_TOTAL=$total
@@ -270,7 +285,7 @@ caches::_saved_app_state() {
   (( size > 0 )) || return 0
 
   log::info "Saved Application State: $(utils::format_bytes "$size")"
-  dry_run_or_exec rm -rf "$state_dir"
+  safe_rm "$state_dir" "Saved Application State"
   _CACHES_SAVEDSTATE_TOTAL=$size
 }
 
@@ -298,7 +313,7 @@ caches::_antigravity() {
     size=$(utils::get_size_bytes "$full_path")
     (( size > 0 )) || continue
     log::info "  Antigravity ${subdir}: $(utils::format_bytes "$size")"
-    dry_run_or_exec rm -rf "$full_path"
+    safe_rm "$full_path" "Antigravity ${subdir}"
     total=$(( total + size ))
   done
 
@@ -318,7 +333,7 @@ caches::_shell_caches() {
     local size
     size=$(utils::get_size_bytes "$zcomp")
     total=$(( total + size ))
-    dry_run_or_exec rm -f "$zcomp"
+    safe_rm "$zcomp" "zsh completion cache"
   done < <(find "$HOME" -maxdepth 1 -name ".zcompdump*" -type f 2>/dev/null || true)
 
   # Oh My Zsh cache — delete contents, not the directory itself
@@ -329,11 +344,7 @@ caches::_shell_caches() {
     if (( omz_size > 0 )); then
       log::info "  Oh My Zsh cache: $(utils::format_bytes "$omz_size")"
       # Delete contents only — Oh My Zsh expects the directory to exist
-      if [[ "$DRY_RUN" == "true" ]]; then
-        log::info "[DRY-RUN] Would delete contents of ${omz_cache}"
-      else
-        find "$omz_cache" -mindepth 1 -delete 2>/dev/null || true
-      fi
+      safe_rm_contents "$omz_cache" "Oh My Zsh cache"
       total=$(( total + omz_size ))
     fi
   fi
@@ -354,7 +365,7 @@ caches::_spotify() {
     if (( size > 0 )); then
       _CACHES_SPOTIFY_TOTAL=$size
       log::info "Spotify cache: $(utils::format_bytes "$size")"
-      dry_run_or_exec rm -rf "$spotify_cache"
+      safe_rm "$spotify_cache" "Spotify cache"
     fi
   fi
 }
@@ -374,7 +385,7 @@ caches::_jetbrains() {
         local dirname
         dirname="$(basename "$ide_cache_dir")"
         log::info "  JetBrains ${dirname}: $(utils::format_bytes "$size")"
-        dry_run_or_exec rm -rf "$ide_cache_dir"
+        safe_rm "$ide_cache_dir" "JetBrains ${dirname} cache"
         total=$(( total + size ))
       fi
     done < <(find "$jetbrains_cache_root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true)
@@ -387,7 +398,7 @@ caches::_jetbrains() {
     logs_size=$(utils::get_size_bytes "$jetbrains_log_root")
     if (( logs_size > 0 )); then
       log::info "  JetBrains logs: $(utils::format_bytes "$logs_size")"
-      dry_run_or_exec rm -rf "$jetbrains_log_root"
+      safe_rm "$jetbrains_log_root" "JetBrains logs"
       total=$(( total + logs_size ))
     fi
   fi
@@ -403,7 +414,7 @@ caches::_jetbrains() {
       size=$(utils::get_size_bytes "$support_dir")
       if (( size > 0 )); then
         log::info "  JetBrains AppSupport ${dirname}: $(utils::format_bytes "$size")"
-        dry_run_or_exec rm -rf "$support_dir"
+        safe_rm "$support_dir" "JetBrains AppSupport ${dirname}"
         total=$(( total + size ))
       fi
     done < <(find "$jetbrains_support_root" -mindepth 1 -maxdepth 1 -type d \
@@ -411,4 +422,54 @@ caches::_jetbrains() {
   fi
 
   _CACHES_JETBRAINS_TOTAL=$total
+}
+
+# ── Podcast tmp artifacts ────────────────────────────────────────────────────
+caches::_podcasts() {
+  _CACHES_PODCASTS_TOTAL=0
+  local container="$HOME/Library/Containers/com.apple.podcasts/Data/tmp"
+  [[ -d "$container" ]] || return 0
+
+  local total=0
+
+  local streamed_media="$container/StreamedMedia"
+  if [[ -d "$streamed_media" ]]; then
+    local size
+    size=$(utils::get_size_bytes "$streamed_media")
+    total=$(( total + size ))
+    safe_rm "$streamed_media" "Podcasts streamed media"
+  fi
+
+  while IFS= read -r f; do
+    local size
+    size=$(utils::get_size_bytes "$f")
+    total=$(( total + size ))
+    safe_rm "$f" "Podcasts tmp"
+  done < <(find "$container" -maxdepth 1 -type f \
+    \( -name "*.heic" -o -name "*.img" -o -name "*CFNetworkDownload*.tmp" \) 2>/dev/null || true)
+
+  _CACHES_PODCASTS_TOTAL=$total
+}
+
+# ── Apple media streaming caches ─────────────────────────────────────────────
+caches::_apple_media() {
+  _CACHES_APPLEMEDIA_TOTAL=0
+  local total=0
+  local -a media_caches=(
+    "$HOME/Library/Caches/com.apple.Music"
+    "$HOME/Library/Caches/com.apple.TV"
+    "$HOME/Library/Caches/com.apple.podcasts"
+  )
+
+  local p
+  for p in "${media_caches[@]}"; do
+    [[ -d "$p" ]] || continue
+    local size
+    size=$(utils::get_size_bytes "$p")
+    (( size > 0 )) || continue
+    total=$(( total + size ))
+    safe_rm "$p" "Apple media cache: $(basename "$p")"
+  done
+
+  _CACHES_APPLEMEDIA_TOTAL=$total
 }
