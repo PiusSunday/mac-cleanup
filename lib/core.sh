@@ -16,9 +16,18 @@ export TARGET_DEVTOOLS=false
 export TARGET_SNAPSHOTS=false
 export TARGET_CACHES=false
 export TARGET_BREW=false
+export TARGET_MAIL=false
+export TARGET_SYSTEM_DEEP=false
 
 # Tracking — accumulate bytes freed across modules
 export TOTAL_FREED=0
+export TOTAL_DRYRUN_BYTES=0
+
+# Feature flags
+export CLEAN_ORPHANS=${CLEAN_ORPHANS:-false}
+export INCLUDE_ML_MODELS=${INCLUDE_ML_MODELS:-false}
+export DEVOPS_RESET_MODE=${DEVOPS_RESET_MODE:-false}
+export SHOW_OPERATION_LOG=${SHOW_OPERATION_LOG:-false}
 
 # Per-module reporting arrays
 # Each module registers: name, category, scanned bytes, freed bytes, status
@@ -34,11 +43,15 @@ readonly SIP_PROTECTED_PATHS=(
   "$HOME/Library/Caches/com.apple.HomeKit"
   "$HOME/Library/Caches/CloudKit"
   "$HOME/Library/Caches/com.apple.Safari"
+  "$HOME/Library/Caches/com.apple.spotlight"
+  "$HOME/Library/Caches/com.apple.Spotlight"
+  "$HOME/Library/Caches/com.apple.FontRegistry"
+  "$HOME/Library/Caches/com.apple.finder"
   "$HOME/Library/Caches/com.apple.homed"
   "$HOME/Library/Caches/com.apple.bird"
   "$HOME/Library/Caches/com.apple.nsurlsessiond"
+  "$HOME/Library/Caches/com.apple.WebKit.Networking"
   "$HOME/Library/Caches/com.apple.ap.adprivacyd"
   "$HOME/Library/Logs"
-  "/private/var/log"
   "/Library/Logs"
 )
