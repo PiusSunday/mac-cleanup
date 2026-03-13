@@ -188,7 +188,20 @@ _safe_rm_check_system_path() {
 safe_rm() {
   local path="$1"
   local label="${2:-$path}"
-  local mode="${3:-normal}"
+  local options="${3:-}"
+  local use_force=false
+  local use_sudo=false
+  local use_internal=false
+
+  if [[ "$options" == *"force"* ]]; then
+    use_force=true
+  fi
+  if [[ "$options" == *"sudo"* ]]; then
+    use_sudo=true
+  fi
+  if [[ "$options" == *"internal"* ]]; then
+    use_internal=true
+  fi
 
   if [[ -z "$path" ]]; then
     log::warn "safe_rm: empty path rejected"
@@ -224,18 +237,20 @@ safe_rm() {
     return 1
   fi
 
-  if [[ "$mode" != "force" ]] && utils::is_whitelisted "$resolved"; then
+  if [[ "$use_force" != "true" ]] && utils::is_whitelisted "$resolved"; then
     log::verbose "safe_rm: whitelisted path skipped: $resolved"
     _oplog "SKIPPED" "$resolved" "whitelist"
     return 0
   fi
 
-  local parent
-  parent="$(dirname "$resolved")"
-  if [[ ! -w "$parent" ]]; then
-    log::verbose "safe_rm: non-writable path skipped: $resolved"
-    _oplog "SKIPPED" "$resolved" "permission"
-    return 1
+  if [[ "$use_sudo" != "true" ]]; then
+    local parent
+    parent="$(dirname "$resolved")"
+    if [[ ! -w "$parent" ]]; then
+      log::verbose "safe_rm: non-writable path skipped: $resolved"
+      _oplog "SKIPPED" "$resolved" "permission"
+      return 1
+    fi
   fi
 
   if [[ ! -e "$resolved" ]]; then
@@ -247,23 +262,40 @@ safe_rm() {
   local bytes_fmt
   bytes_fmt=$(utils::format_bytes "$bytes")
 
-  if [[ "$DRY_RUN" == "true" ]]; then
+  if [[ "$DRY_RUN" == "true" && "$use_internal" != "true" ]]; then
     TOTAL_DRYRUN_BYTES=$(( TOTAL_DRYRUN_BYTES + bytes ))
     log::info "[DRY-RUN] ${bytes_fmt} ${label}"
     _oplog "DRYRUN" "$resolved" "$bytes_fmt"
     return 0
   fi
 
-  rm -rf -- "$resolved" 2>/dev/null || {
-    log::verbose "safe_rm: deletion failed: $resolved"
-    _oplog "SKIPPED" "$resolved" "delete-failed"
-    return 1
-  }
+  if [[ "$use_sudo" == "true" ]]; then
+    sudo rm -rf -- "$resolved" 2>/dev/null || {
+      log::verbose "safe_rm: deletion failed: $resolved"
+      _oplog "SKIPPED" "$resolved" "delete-failed"
+      return 1
+    }
+  else
+    rm -rf -- "$resolved" 2>/dev/null || {
+      log::verbose "safe_rm: deletion failed: $resolved"
+      _oplog "SKIPPED" "$resolved" "delete-failed"
+      return 1
+    }
+  fi
+
+  if [[ "$use_internal" == "true" ]]; then
+    return 0
+  fi
 
   TOTAL_FREED=$(( TOTAL_FREED + bytes ))
   log::success "${label} ($(utils::format_bytes "$bytes"))"
   _oplog "REMOVED" "$resolved" "$bytes_fmt"
   return 0
+}
+
+safe_rm_internal() {
+  local path="$1"
+  safe_rm "$path" "internal" "internal"
 }
 
 safe_rm_contents() {
@@ -453,14 +485,14 @@ utils::with_spinner() {
   fi
 
   if (( exit_code == 0 )); then
-    rm -f "$stderr_file"
+    safe_rm_internal "$stderr_file"
     log::success "$msg"
     return 0
   else
     if [[ -s "$stderr_file" ]]; then
       cat "$stderr_file" >&2
     fi
-    rm -f "$stderr_file"
+    safe_rm_internal "$stderr_file"
     log::error "$msg (command failed with exit code ${exit_code})"
     return "$exit_code"
   fi
