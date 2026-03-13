@@ -64,3 +64,13 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"not found"* ]]
 }
+
+@test "xcode::_documentation_cache: dry-run reports and preserves docs cache" {
+  mkdir -p "$HOME/Library/Developer/Xcode/DocumentationCache"
+  echo "doc cache" > "$HOME/Library/Developer/Xcode/DocumentationCache/index.db"
+
+  DRY_RUN=true
+  run xcode::_documentation_cache
+  [ "$status" -eq 0 ]
+  [ -d "$HOME/Library/Developer/Xcode/DocumentationCache" ]
+}

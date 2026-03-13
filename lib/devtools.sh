@@ -54,10 +54,9 @@ PYCACHE_EXCLUDE_PATHS=(
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 # Build find exclusion args securely into a caller's array
-# Usage: devtools::_build_exclude_args IN_ARRAY_NAME OUT_ARRAY_NAME
+# Usage: while read args from NUL stream and append to local array
 devtools::_build_exclude_args() {
   local in_array="$1[@]"
-  local out_array="$2"
   local -a tmp=()
   local p
   for p in "${!in_array}"; do
@@ -65,13 +64,10 @@ devtools::_build_exclude_args() {
       tmp+=("-path" "$p" "-prune" "-o")
     fi
   done
-  # Assign tmp to out_array securely
-  local assign_str="${out_array}=("
-  for p in "${tmp[@]}"; do
-    assign_str+=" $(printf '%q' "$p")"
-  done
-  assign_str+=" )"
-  eval "$assign_str"
+  if (( ${#tmp[@]} == 0 )); then
+    return 0
+  fi
+  printf '%s\0' "${tmp[@]}"
 }
 
 # Check if a node_modules has a nearby package.json (parent or grandparent)
@@ -106,6 +102,9 @@ devtools::clean() {
   devtools::_python_cache
   module_scanned=$(( module_scanned + _DEV_PYTHON_TOTAL ))
 
+  devtools::_python_modern
+  module_scanned=$(( module_scanned + _DEV_PYMODERN_TOTAL ))
+
   devtools::_gradle_cache
   module_scanned=$(( module_scanned + _DEV_GRADLE_TOTAL ))
 
@@ -114,6 +113,9 @@ devtools::clean() {
 
   devtools::_pnpm
   module_scanned=$(( module_scanned + _DEV_PNPM_TOTAL ))
+
+  devtools::_bun_tnpm
+  module_scanned=$(( module_scanned + _DEV_BUNTNPM_TOTAL ))
 
   devtools::_flutter
   module_scanned=$(( module_scanned + _DEV_FLUTTER_TOTAL ))
@@ -143,6 +145,8 @@ _DEV_GRADLE_TOTAL=0
 _DEV_RUBY_TOTAL=0
 _DEV_PNPM_TOTAL=0
 _DEV_FLUTTER_TOTAL=0
+_DEV_PYMODERN_TOTAL=0
+_DEV_BUNTNPM_TOTAL=0
 
 # ── a) node_modules ──────────────────────────────────────────────────────────
 devtools::_node_modules() {
@@ -155,7 +159,9 @@ devtools::_node_modules() {
 
   # Build exclusion args
   local exclude_args=()
-  devtools::_build_exclude_args DEVTOOLS_EXCLUDE_PATHS exclude_args
+  while IFS= read -r -d '' arg; do
+    exclude_args+=("$arg")
+  done < <(devtools::_build_exclude_args DEVTOOLS_EXCLUDE_PATHS)
 
   for scan_dir in "${DEVTOOLS_SCAN_DIRS[@]}"; do
     [[ -d "$scan_dir" ]] || continue
@@ -198,7 +204,7 @@ devtools::_node_modules() {
           fi
         fi
 
-        dry_run_or_exec rm -rf "$nm_dir"
+        safe_rm "$nm_dir" "orphaned node_modules"
       else
         log::verbose "  Active: ${nm_dir} (${size_fmt})"
       fi
@@ -229,7 +235,9 @@ devtools::_rust_targets() {
   local total_bytes=0
 
   local exclude_args=()
-  devtools::_build_exclude_args DEVTOOLS_EXCLUDE_PATHS exclude_args
+  while IFS= read -r -d '' arg; do
+    exclude_args+=("$arg")
+  done < <(devtools::_build_exclude_args DEVTOOLS_EXCLUDE_PATHS)
 
   for scan_dir in "${DEVTOOLS_SCAN_DIRS[@]}"; do
     [[ -d "$scan_dir" ]] || continue
@@ -281,7 +289,9 @@ devtools::_python_cache() {
 
   # Build exclusion args from pycache-specific list
   local exclude_args=()
-  devtools::_build_exclude_args PYCACHE_EXCLUDE_PATHS exclude_args
+  while IFS= read -r -d '' arg; do
+    exclude_args+=("$arg")
+  done < <(devtools::_build_exclude_args PYCACHE_EXCLUDE_PATHS)
 
   for scan_dir in "${DEVTOOLS_SCAN_DIRS[@]}"; do
     [[ -d "$scan_dir" ]] || continue
@@ -292,14 +302,14 @@ devtools::_python_cache() {
       size_bytes=$(utils::get_size_bytes "$cache_dir")
       total_bytes=$(( total_bytes + size_bytes ))
       (( count++ )) || true
-      dry_run_or_exec rm -rf "$cache_dir"
-    done < <(find "$scan_dir" -maxdepth 8 -type d -name "__pycache__" \
+      safe_rm "$cache_dir" "python __pycache__"
+    done < <(find "$scan_dir" -maxdepth 8 "${exclude_args[@]}" -type d -name "__pycache__" \
       -not -path "*/venv/*" \
       -not -path "*/.venv/*" \
       -not -path "*/env/*" \
       -not -path "*/.env/*" \
       -not -path "*/site-packages/*" \
-      "${exclude_args[@]}" 2>/dev/null || true)
+      2>/dev/null || true)
   done
 
   _DEV_PYTHON_TOTAL=$total_bytes
@@ -325,7 +335,7 @@ devtools::_gradle_cache() {
   _DEV_GRADLE_TOTAL=$size_bytes
 
   log::info "Gradle cache: $(utils::format_bytes "$size_bytes")"
-  dry_run_or_exec rm -rf "$path"
+  safe_rm "$path" "Gradle cache"
 }
 
 # ── e) Ruby Bundler + Gem cache ───────────────────────────────────────────────
@@ -347,7 +357,7 @@ devtools::_ruby() {
     size=$(utils::get_size_bytes "$bundler_cache")
     if (( size > 0 )); then
       log::info "  Ruby Bundler cache: $(utils::format_bytes "$size")"
-      dry_run_or_exec rm -rf "$bundler_cache"
+      safe_rm "$bundler_cache" "Ruby Bundler cache"
       total=$(( total + size ))
     fi
   fi
@@ -359,7 +369,7 @@ devtools::_ruby() {
     size=$(utils::get_size_bytes "$gem_cache")
     if (( size > 0 )); then
       log::info "  RubyGems cache: $(utils::format_bytes "$size")"
-      dry_run_or_exec rm -rf "$gem_cache"
+      safe_rm "$gem_cache" "RubyGems cache"
       total=$(( total + size ))
     fi
   fi
@@ -372,7 +382,7 @@ devtools::_ruby() {
       size=$(utils::get_size_bytes "$rbenv_cache")
       if (( size > 0 )); then
         log::info "  rbenv cache: $(utils::format_bytes "$size")"
-        dry_run_or_exec rm -rf "$rbenv_cache"
+        safe_rm "$rbenv_cache" "rbenv cache"
         total=$(( total + size ))
       fi
     fi
@@ -401,7 +411,7 @@ devtools::_cargo_cache() {
     size=$(utils::get_size_bytes "$cargo_registry")
     if (( size > 0 )); then
       log::info "  Cargo registry cache: $(utils::format_bytes "$size")"
-      dry_run_or_exec rm -rf "$cargo_registry"
+      safe_rm "$cargo_registry" "Cargo registry cache"
       total=$(( total + size ))
     fi
   fi
@@ -412,7 +422,7 @@ devtools::_cargo_cache() {
     size=$(utils::get_size_bytes "$cargo_git")
     if (( size > 0 )); then
       log::info "  Cargo git cache: $(utils::format_bytes "$size")"
-      dry_run_or_exec rm -rf "$cargo_git"
+      safe_rm "$cargo_git" "Cargo git cache"
       total=$(( total + size ))
     fi
   fi
@@ -474,7 +484,7 @@ devtools::_flutter() {
       build_size=$(utils::get_size_bytes "${project_dir}/build")
       total_bytes=$(( total_bytes + build_size ))
       log::info "  ${ARROW} $(utils::format_bytes "$build_size")  ${project_dir}/build"
-      dry_run_or_exec rm -rf "${project_dir}/build"
+      safe_rm "${project_dir}/build" "Flutter build directory"
     fi
 
     # .dart_tool/ directory
@@ -483,7 +493,7 @@ devtools::_flutter() {
       dt_size=$(utils::get_size_bytes "${project_dir}/.dart_tool")
       total_bytes=$(( total_bytes + dt_size ))
       log::info "  ${ARROW} $(utils::format_bytes "$dt_size")  ${project_dir}/.dart_tool"
-      dry_run_or_exec rm -rf "${project_dir}/.dart_tool"
+      safe_rm "${project_dir}/.dart_tool" "Flutter .dart_tool"
     fi
 
   done < <(
@@ -501,7 +511,7 @@ devtools::_flutter() {
       log::info "  Pub cache: $(utils::format_bytes "$pub_size") at ~/.pub-cache"
       log::warn "  Cleaning pub cache forces re-download of all packages on next build."
       if utils::confirm "Clean pub cache (~/.pub-cache)?"; then
-        dry_run_or_exec rm -rf "$HOME/.pub-cache"
+        safe_rm "$HOME/.pub-cache" "Flutter pub cache"
         total_bytes=$(( total_bytes + pub_size ))
       fi
     fi
@@ -514,4 +524,57 @@ devtools::_flutter() {
   else
     log::info "Flutter artifacts: none found."
   fi
+}
+
+# ── h) Modern Python ecosystem caches ───────────────────────────────────────
+devtools::_python_modern() {
+  _DEV_PYMODERN_TOTAL=0
+  local total=0
+  local -a paths=(
+    "$HOME/.cache/uv"
+    "$HOME/.cache/ruff"
+    "$HOME/.cache/mypy"
+    "$HOME/.cache/poetry"
+    "$HOME/.cache/wandb"
+    "$HOME/.cache/torch"
+    "$HOME/.cache/tensorflow"
+    "$HOME/.conda/pkgs"
+    "$HOME/anaconda3/pkgs"
+    "$HOME/.pyenv/cache"
+  )
+
+  local p
+  for p in "${paths[@]}"; do
+    [[ -d "$p" ]] || continue
+    local size
+    size=$(utils::get_size_bytes "$p")
+    (( size > 0 )) || continue
+    total=$(( total + size ))
+    safe_rm "$p" "Python modern cache: $(basename "$p")"
+  done
+
+  _DEV_PYMODERN_TOTAL=$total
+}
+
+# ── i) Bun and tnpm caches ──────────────────────────────────────────────────
+devtools::_bun_tnpm() {
+  _DEV_BUNTNPM_TOTAL=0
+  local total=0
+  local -a paths=(
+    "$HOME/.bun/install/cache"
+    "$HOME/.tnpm/_cacache"
+    "$HOME/.tnpm/_logs"
+  )
+
+  local p
+  for p in "${paths[@]}"; do
+    [[ -d "$p" ]] || continue
+    local size
+    size=$(utils::get_size_bytes "$p")
+    (( size > 0 )) || continue
+    total=$(( total + size ))
+    safe_rm "$p" "JS runtime cache: $(basename "$p")"
+  done
+
+  _DEV_BUNTNPM_TOTAL=$total
 }
