@@ -194,6 +194,10 @@ parse_flags() {
   done
 
   # Determine effective mode after all flags are parsed
+  if [[ "${SHOW_OPERATION_LOG:-false}" == "true" ]]; then
+    return
+  fi
+
   if [[ "$explicit_dry_run" == "true" ]]; then
     # Explicit --dry-run — nothing to prompt
     DRY_RUN=true
