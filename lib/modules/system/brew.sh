@@ -29,6 +29,7 @@ brew::clean() {
   log::info "Homebrew cache: $(utils::format_bytes "$brew_cache_size") at ${brew_cache_dir}"
 
   if [[ "$DRY_RUN" == "true" ]]; then
+    TOTAL_DRYRUN_BYTES=$(( TOTAL_DRYRUN_BYTES + brew_cache_size ))
     log::info "[DRY-RUN] Would run: brew cleanup --prune=all"
     log::info "[DRY-RUN] Would run: brew autoremove"
   else

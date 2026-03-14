@@ -35,15 +35,22 @@ system::clean() {
 
   # Determine status
   local status="clean"
-  if (( module_scanned > 0 )); then
-    status="$module_scanned"
-  fi
-  # If system data clues were found, add review status
-  if [[ "${_SYS_HAS_CLUES:-false}" == "true" ]]; then
-    status="review"
+  local projected=0
+  if [[ "$DRY_RUN" == "true" ]]; then
+    projected="$module_scanned"
+  else
+    projected="$freed"
   fi
 
-  utils::register_module "System" "System" "$module_scanned" "$freed" "$status"
+  # System Data clues are informational only. If the module also has real
+  # cleanup candidates, it still behaves as a normal cleanable module.
+  if (( module_scanned == 0 )) && [[ "${_SYS_HAS_CLUES:-false}" == "true" ]]; then
+    status="review"
+  elif (( projected > 0 )); then
+    status="$projected"
+  fi
+
+  utils::register_module "System" "System" "$module_scanned" "$freed" "$status" "$projected"
 }
 
 # ── Internal helpers ──────────────────────────────────────────────────────────

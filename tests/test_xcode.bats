@@ -9,9 +9,9 @@ setup() {
   # Use a temporary log file to avoid writing to the real user's HOME
   export LOG_FILE="${TEST_HOME}/.mac-cleanup/cleanup.log"
 
-  source "${BATS_TEST_DIRNAME}/../lib/core.sh"
-  source "${BATS_TEST_DIRNAME}/../lib/utils.sh"
-  source "${BATS_TEST_DIRNAME}/../lib/xcode.sh"
+  source "${BATS_TEST_DIRNAME}/../lib/core/core.sh"
+  source "${BATS_TEST_DIRNAME}/../lib/core/utils.sh"
+  source "${BATS_TEST_DIRNAME}/../lib/modules/dev/xcode.sh"
 
   # Default to dry-run and skip confirm
   DRY_RUN=true

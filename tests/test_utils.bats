@@ -7,8 +7,8 @@ setup() {
   export LOG_FILE="${TEST_LOG_DIR}/cleanup.log"
 
   # Source required files
-  source "${BATS_TEST_DIRNAME}/../lib/core.sh"
-  source "${BATS_TEST_DIRNAME}/../lib/utils.sh"
+  source "${BATS_TEST_DIRNAME}/../lib/core/core.sh"
+  source "${BATS_TEST_DIRNAME}/../lib/core/utils.sh"
 }
 
 teardown() {
@@ -146,6 +146,7 @@ teardown() {
   MODULE_SCANNED=()
   MODULE_FREED=()
   MODULE_STATUS=()
+  MODULE_PROJECTED=()
 
   utils::register_module "TestModule" "System" "1024" "512" "clean"
 
@@ -155,6 +156,7 @@ teardown() {
   [ "${MODULE_SCANNED[0]}" = "1024" ]
   [ "${MODULE_FREED[0]}" = "512" ]
   [ "${MODULE_STATUS[0]}" = "clean" ]
+  [ "${MODULE_PROJECTED[0]}" = "0" ]
 }
 
 @test "utils::register_module: appends multiple modules" {
@@ -163,6 +165,7 @@ teardown() {
   MODULE_SCANNED=()
   MODULE_FREED=()
   MODULE_STATUS=()
+  MODULE_PROJECTED=()
 
   utils::register_module "Xcode" "Developer Tools" "100" "50" "clean"
   utils::register_module "Docker" "Developer Tools" "200" "100" "skipped"
@@ -174,6 +177,22 @@ teardown() {
   [ "${MODULE_SCANNED[1]}" = "200" ]
   [ "${MODULE_FREED[1]}" = "100" ]
   [ "${MODULE_STATUS[1]}" = "skipped" ]
+  [ "${MODULE_PROJECTED[0]}" = "0" ]
+  [ "${MODULE_PROJECTED[1]}" = "0" ]
+}
+
+@test "utils::register_module: uses numeric status as projected bytes in dry-run mode" {
+  DRY_RUN=true
+  MODULE_NAMES=()
+  MODULE_CATEGORIES=()
+  MODULE_SCANNED=()
+  MODULE_FREED=()
+  MODULE_STATUS=()
+  MODULE_PROJECTED=()
+
+  utils::register_module "Caches" "Caches & Logs" "2048" "0" "2048"
+
+  [ "${MODULE_PROJECTED[0]}" = "2048" ]
 }
 
 # ── Terminal-aware colors ─────────────────────────────────────────────────────
@@ -213,8 +232,8 @@ teardown() {
   local wrapper="${BATS_TEST_TMPDIR}/tty_success.sh"
   cat > "$wrapper" <<'SCRIPT'
 #!/usr/bin/env bash
-source "${1}/lib/core.sh"
-source "${1}/lib/utils.sh"
+source "${1}/lib/core/core.sh"
+source "${1}/lib/core/utils.sh"
 utils::with_spinner "TTY success test" true
 SCRIPT
   chmod +x "$wrapper"
@@ -233,8 +252,8 @@ sys.exit(os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1)
   local wrapper="${BATS_TEST_TMPDIR}/tty_fail.sh"
   cat > "$wrapper" <<'SCRIPT'
 #!/usr/bin/env bash
-source "${1}/lib/core.sh"
-source "${1}/lib/utils.sh"
+source "${1}/lib/core/core.sh"
+source "${1}/lib/core/utils.sh"
 utils::with_spinner "TTY fail test" bash -c 'echo "oops" >&2; exit 42'
 SCRIPT
   chmod +x "$wrapper"

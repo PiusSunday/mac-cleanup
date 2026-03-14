@@ -6,9 +6,9 @@ setup() {
   TEST_LOG_DIR=$(mktemp -d "${BATS_TEST_TMPDIR:-/tmp}/mac-cleanup-test.XXXXXX")
   export LOG_FILE="${TEST_LOG_DIR}/cleanup.log"
 
-  source "${BATS_TEST_DIRNAME}/../lib/core.sh"
-  source "${BATS_TEST_DIRNAME}/../lib/utils.sh"
-  source "${BATS_TEST_DIRNAME}/../lib/docker.sh"
+  source "${BATS_TEST_DIRNAME}/../lib/core/core.sh"
+  source "${BATS_TEST_DIRNAME}/../lib/core/utils.sh"
+  source "${BATS_TEST_DIRNAME}/../lib/modules/dev/docker.sh"
 
   DRY_RUN=true
   SKIP_CONFIRM=true

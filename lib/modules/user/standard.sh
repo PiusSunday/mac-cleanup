@@ -92,6 +92,8 @@ caches::_user_caches() {
     app_name=$(basename "$cache_dir")
     # Skip JetBrains — handled exclusively by caches::_jetbrains
     [[ "$app_name" == "JetBrains" ]] && continue
+    # Skip Homebrew — handled exclusively by brew::clean
+    [[ "$app_name" == "Homebrew" ]] && continue
     if ! utils::is_deletable "$cache_dir"; then
       log::verbose "  Skipping protected: $(basename "$cache_dir")"
       continue

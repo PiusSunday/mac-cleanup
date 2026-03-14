@@ -7,7 +7,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.0] - 2026-03-13
+## [0.4.0] - 2026-03-14
+
+### Added
+
+- **Domain-Driven Architecture Refactor**: The monolithic `lib/` directory has been restructured into `core/`, `modules/system/`, `modules/user/`, `modules/dev/`, and `optimize/` for better scalability.
+- **Advanced Application Cleaning**: Iterates safely through User Containers to clear caches while skipping critical `com.apple.*` sandboxes to protect iCloud usage.
+- **Deep Browser Frameworks Cleanup**: Detects and purges abandoned older framework payloads for Google Chrome and Microsoft Edge. Also cleans Safari Favicon caches, Arc, and Zen browsers.
+- **Time Machine Cleanup Expansions**: Detects and deletes stale orphaned `.inProgress` backups older than 1 day.
+- **macOS Installer Leftovers**: Purges abandoned macOS Installer applications (`/Applications/Install macOS*.app`) and `macOS Install Data` folders older than 14 days.
+- **Deep System Diagnostics**: Added code-signing download cache clearing (`com.apple.nsurlsessiond/Downloads`).
+- **Optimization Target (`--optimize` / `-O`)**: New flag that triggers DNS cache flushing, LaunchServices rebuilding, Safari/Messages SQLite Vacuuming, and font cache deletion.
+
+### Changed
+
+- Lowered `DEEP_LOG_AGE_DAYS` threshold for unified trace archives and diagnostic power logs from 30 days down to 14 days.
+- Adjusted deep find queries using `sudo find` to reliably reach diagnostic and container targets without permission false negatives.
+
+### Fixed
+
+- Fixed Homebrew formula installation block for multi-level `lib/` directory structures.
+
+## [0.3.2] - 2026-03-13
 
 ### Added
 

@@ -8,9 +8,9 @@ setup() {
   mkdir -p "$HOME/Library/Preferences"
   mkdir -p "$HOME/Library/Caches/com.apple.Safari/fsCachedData"
 
-  source "$BATS_TEST_DIRNAME/../lib/core.sh"
-  source "$BATS_TEST_DIRNAME/../lib/utils.sh"
-  source "$BATS_TEST_DIRNAME/../lib/system_deep.sh"
+  source "$BATS_TEST_DIRNAME/../lib/core/core.sh"
+  source "$BATS_TEST_DIRNAME/../lib/core/utils.sh"
+  source "$BATS_TEST_DIRNAME/../lib/modules/system/deep.sh"
 
   DRY_RUN=false
   SKIP_CONFIRM=true

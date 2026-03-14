@@ -3,9 +3,9 @@
 
 setup() {
   # Source test dependencies
-  source "$BATS_TEST_DIRNAME/../lib/core.sh"
-  source "$BATS_TEST_DIRNAME/../lib/utils.sh"
-  source "$BATS_TEST_DIRNAME/../lib/system.sh"
+  source "$BATS_TEST_DIRNAME/../lib/core/core.sh"
+  source "$BATS_TEST_DIRNAME/../lib/core/utils.sh"
+  source "$BATS_TEST_DIRNAME/../lib/modules/system/standard.sh"
   DRY_RUN=true
   VERBOSE=false
   SKIP_CONFIRM=true
@@ -149,9 +149,32 @@ setup() {
   MODULE_SCANNED=()
   MODULE_FREED=()
   MODULE_STATUS=()
+  MODULE_PROJECTED=()
 
   system::clean
 
   [ "${MODULE_NAMES[0]}" = "System" ]
   [ "${MODULE_CATEGORIES[0]}" = "System" ]
+}
+
+@test "system::clean: keeps clean status when reclaimable bytes exist alongside info clues" {
+  system::_crash_reports() { _SYS_CRASH_TOTAL=1024; }
+  system::_ds_store() { _SYS_DSSTORE_TOTAL=0; }
+  system::_trash() { _SYS_TRASH_TOTAL=0; }
+  system::_dev_tool_caches() { _SYS_DEVCACHE_TOTAL=0; }
+  system::_system_data_clues() { _SYS_HAS_CLUES=true; }
+  utils::get_free_bytes() { echo 100000; }
+  DRY_RUN=true
+
+  MODULE_NAMES=()
+  MODULE_CATEGORIES=()
+  MODULE_SCANNED=()
+  MODULE_FREED=()
+  MODULE_STATUS=()
+  MODULE_PROJECTED=()
+
+  system::clean
+
+  [ "${MODULE_STATUS[0]}" = "1024" ]
+  [ "${MODULE_PROJECTED[0]}" = "1024" ]
 }
