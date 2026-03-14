@@ -70,12 +70,13 @@ ${BOLD}TARGETS:${RESET}
   --all, -a          Run all cleanup targets
 
 ${BOLD}OPTIONS:${RESET}
-  --dry-run, -n      Preview what would be deleted (DEFAULT — no files removed)
+  --dry-run, -n      Preview what would be deleted
   --yes, -y          Skip confirmation prompts and run live cleanup
   --clean-orphans    Delete orphan candidates after per-item confirmation
   --devops-reset     Run nuclear cleanup for Docker and developer ecosystems
   --include-ml-models Include HuggingFace/Ollama model caches during DevOps reset
   --show-log         Print operation log and exit
+  --version, -V      Print version and exit
   --verbose, -v      Show detailed logs
   --help, -h         Show this help
 
@@ -87,28 +88,51 @@ ${BOLD}EXAMPLES:${RESET}
   mac-cleanup --devtools            Find orphaned build artifacts
   mac-cleanup --devops-reset --yes  Nuclear cleanup of dev toolchain caches
   mac-cleanup --show-log            Show deletion operation log
+  mac-cleanup --version             Show the current version
 
-${YELLOW}${WARN}  By default, mac-cleanup runs in DRY-RUN mode and will NOT delete anything.${RESET}
-   To actually delete files, run without --dry-run. You will be prompted for
-   confirmation unless --yes is also passed.
+${YELLOW}${WARN}  Running mac-cleanup without cleanup targets defaults to a safe --all --dry-run preview.${RESET}
+   If you pass cleanup targets without --dry-run, you will be prompted before
+   any live deletion unless --yes is also passed.
 
 EOF
+}
+
+show_version() {
+  printf 'mac-cleanup v%s\n' "$VERSION"
+}
+
+set_default_targets() {
+  TARGET_SYSTEM=true
+  TARGET_XCODE=true
+  TARGET_DOCKER=true
+  TARGET_DEVTOOLS=true
+  TARGET_SNAPSHOTS=true
+  TARGET_CACHES=true
+  TARGET_BREW=true
+  TARGET_MAIL=true
+  TARGET_SYSTEM_DEEP=true
+  TARGET_OPTIMIZE=false
+}
+
+has_cleanup_target() {
+  [[ "$TARGET_SYSTEM" == "true" ]] \
+    || [[ "$TARGET_XCODE" == "true" ]] \
+    || [[ "$TARGET_DOCKER" == "true" ]] \
+    || [[ "$TARGET_DEVTOOLS" == "true" ]] \
+    || [[ "$TARGET_SNAPSHOTS" == "true" ]] \
+    || [[ "$TARGET_CACHES" == "true" ]] \
+    || [[ "$TARGET_BREW" == "true" ]] \
+    || [[ "$TARGET_MAIL" == "true" ]] \
+    || [[ "$TARGET_SYSTEM_DEEP" == "true" ]] \
+    || [[ "$TARGET_OPTIMIZE" == "true" ]] \
+    || [[ "$DEVOPS_RESET_MODE" == "true" ]]
 }
 
 # ── Flag parsing ──────────────────────────────────────────────────────────────
 parse_flags() {
   if [[ $# -eq 0 ]]; then
     DRY_RUN=true
-    TARGET_SYSTEM=true
-    TARGET_XCODE=true
-    TARGET_DOCKER=true
-    TARGET_DEVTOOLS=true
-    TARGET_SNAPSHOTS=true
-    TARGET_CACHES=true
-    TARGET_BREW=true
-    TARGET_MAIL=true
-    TARGET_SYSTEM_DEEP=true
-    TARGET_OPTIMIZE=false
+    set_default_targets
     log::warn "No flags provided. Running --all --dry-run by default."
     return
   fi
@@ -170,6 +194,9 @@ parse_flags() {
       --show-log)
         SHOW_OPERATION_LOG=true
         ;;
+      --version|-V)
+        SHOW_VERSION=true
+        ;;
       --dry-run|-n)
         DRY_RUN=true
         explicit_dry_run=true
@@ -194,7 +221,18 @@ parse_flags() {
   done
 
   # Determine effective mode after all flags are parsed
-  if [[ "${SHOW_OPERATION_LOG:-false}" == "true" ]]; then
+  if [[ "$SHOW_OPERATION_LOG" == "true" ]] || [[ "$SHOW_VERSION" == "true" ]]; then
+    return
+  fi
+
+  if ! has_cleanup_target; then
+    set_default_targets
+    DRY_RUN=true
+    if [[ "$SKIP_CONFIRM" == "true" ]] && [[ "$explicit_dry_run" != "true" ]]; then
+      log::warn "No cleanup target selected. Ignoring --yes and running --all --dry-run by default."
+    else
+      log::warn "No cleanup target selected. Running --all --dry-run by default."
+    fi
     return
   fi
 
@@ -348,6 +386,11 @@ print_report() {
 # ── Main ──────────────────────────────────────────────────────────────────────
 main() {
   parse_flags "$@"
+
+  if [[ "$SHOW_VERSION" == "true" ]]; then
+    show_version
+    exit 0
+  fi
 
   if [[ "$SHOW_OPERATION_LOG" == "true" ]]; then
     utils::show_operation_log

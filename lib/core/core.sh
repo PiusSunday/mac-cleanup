@@ -6,7 +6,7 @@ export DRY_RUN=${DRY_RUN:-true}
 export VERBOSE=${VERBOSE:-false}
 export SKIP_CONFIRM=${SKIP_CONFIRM:-false}
 export LOG_FILE=${LOG_FILE:-"$HOME/.mac-cleanup/cleanup.log"}
-export VERSION="0.4.0"
+export VERSION="0.4.1"
 
 # Cleanup targets (default: all false, set by CLI flags)
 export TARGET_SYSTEM=false
@@ -28,6 +28,8 @@ export CLEAN_ORPHANS=${CLEAN_ORPHANS:-false}
 export INCLUDE_ML_MODELS=${INCLUDE_ML_MODELS:-false}
 export DEVOPS_RESET_MODE=${DEVOPS_RESET_MODE:-false}
 export SHOW_OPERATION_LOG=${SHOW_OPERATION_LOG:-false}
+export SHOW_VERSION=${SHOW_VERSION:-false}
+export TARGET_OPTIMIZE=${TARGET_OPTIMIZE:-false}
 
 # Per-module reporting arrays
 # Each module registers: name, category, scanned bytes, freed bytes, status,

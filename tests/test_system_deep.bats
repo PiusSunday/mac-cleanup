@@ -59,3 +59,27 @@ teardown() {
   [ -e "$cache_file" ]
   [ "$TOTAL_DRYRUN_BYTES" -gt 0 ]
 }
+
+@test "system_deep::_delete_by_find: dry-run without sudo does not invoke sudo" {
+  local protected_dir="$HOME/protected-logs"
+  mkdir -p "$protected_dir"
+  echo "old-log" > "$protected_dir/test.log"
+
+  DRY_RUN=true
+  TOTAL_DRYRUN_BYTES=0
+  _SYSTEM_DEEP_TOTAL=0
+  _SYSTEM_DEEP_CAN_USE_SUDO=false
+
+  sudo() {
+    echo "sudo-called"
+    return 1
+  }
+
+  run system_deep::_delete_by_find "$protected_dir" "Test log" 0 true -name "*.log"
+
+  unset -f sudo
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"sudo-called"* ]]
+  [[ "$output" == *"Test log"* ]]
+  [ -e "$protected_dir/test.log" ]
+}
