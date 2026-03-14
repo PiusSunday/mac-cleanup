@@ -175,6 +175,32 @@ setup() {
 
   system::clean
 
-  [ "${MODULE_STATUS[0]}" = "1024" ]
+  [ "${MODULE_STATUS[0]}" = "clean" ]
   [ "${MODULE_PROJECTED[0]}" = "1024" ]
+}
+
+# ── var/folders ───────────────────────────────────────────────────────────────
+
+@test "system::_var_folders: safely cleans safe temp subdirs" {
+  # Mock getconf to return a real valid directory so the early exit passes
+  mkdir -p "${BATS_TEST_TMPDIR}/fake_user_tmp"
+  getconf() { echo "${BATS_TEST_TMPDIR}/fake_user_tmp"; }
+  export -f getconf
+
+  # Mock find to circumvent hardcoded /private/var/folders
+  find() {
+    echo "${BATS_TEST_TMPDIR}/fake_var_folders/UUID/T/TemporaryItems"
+  }
+  export -f find
+
+  mkdir -p "${BATS_TEST_TMPDIR}/fake_var_folders/UUID/T/TemporaryItems"
+  echo "temp data" > "${BATS_TEST_TMPDIR}/fake_var_folders/UUID/T/TemporaryItems/file"
+
+  _SYS_VARFOLDERS_TOTAL=0
+  system::_var_folders > /dev/null 2>&1
+
+  unset -f getconf
+  unset -f find
+
+  [ "$_SYS_VARFOLDERS_TOTAL" -gt 0 ]
 }

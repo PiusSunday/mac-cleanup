@@ -24,6 +24,8 @@ orphans::clean() {
   orphans::_scan_containers "$installed_tmp"
   orphans::_scan_preferences "$installed_tmp"
 
+  orphans::_broken_plists
+
   safe_rm_internal "$installed_tmp"
 
   if [[ "$CLEAN_ORPHANS" == "true" ]]; then
@@ -203,6 +205,27 @@ orphans::_scan_preferences() {
     orphans::_is_recent "$plist" && continue
     orphans::_record_candidate "$plist" "$name"
   done < <(find "$base" -maxdepth 1 -name "*.plist" -type f 2>/dev/null || true)
+}
+
+orphans::_broken_plists() {
+  log::info "Scanning for corrupt preference files..."
+  local count=0
+
+  while IFS= read -r plist; do
+    [[ -n "$plist" ]] || continue
+    if ! plutil -lint "$plist" >/dev/null 2>&1; then
+      # Only report — never auto-delete preference files
+      log::warn "  Corrupt plist: $(basename "$plist")"
+      (( count++ )) || true
+    fi
+  done < <(find "$HOME/Library/Preferences" -maxdepth 1 -name "*.plist" -type f \
+    -not -name "com.apple.*" -not -name ".GlobalPreferences*" -not -name "loginwindow.plist" 2>/dev/null || true)
+
+  if (( count > 0 )); then
+    log::warn "  ${count} corrupt plist(s) found — review manually or delete and re-open app."
+  else
+    log::info "  No corrupt preference files found."
+  fi
 }
 
 orphans::_delete_confirmed_candidates() {

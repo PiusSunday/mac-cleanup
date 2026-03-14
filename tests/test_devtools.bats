@@ -142,8 +142,9 @@ setup() {
 @test "devtools::_gradle_cache: detects gradle cache" {
   local old_home="$HOME"
   export HOME="${BATS_TEST_TMPDIR}/fake_home_gradle"
-  mkdir -p "$HOME/.gradle/caches"
-  echo "cache data" > "$HOME/.gradle/caches/testfile"
+  mkdir -p "$HOME/.gradle/caches/version_mock"
+  echo "cache data" > "$HOME/.gradle/caches/version_mock/testfile"
+  touch -t 202001010101 "$HOME/.gradle/caches/version_mock"
 
   _DEV_GRADLE_TOTAL=0
   devtools::_gradle_cache > /dev/null 2>&1
@@ -173,4 +174,24 @@ setup() {
 
   [ "${MODULE_NAMES[0]}" = "Dev Artifacts" ]
   [ "${MODULE_CATEGORIES[0]}" = "Developer Tools" ]
+}
+
+# ── Bun / tnpm ────────────────────────────────────────────────────────────────
+
+@test "devtools::_bun_tnpm: detects bun caches" {
+  local old_home="$HOME"
+  export HOME="${BATS_TEST_TMPDIR}/fake_bun_home"
+  mkdir -p "$HOME/Library/Caches/bun"
+  echo "bun data" > "$HOME/Library/Caches/bun/testfile"
+
+  # Mock command to simulate bun being installed
+  command() { return 0; }
+  export -f command
+
+  _DEV_BUNTNPM_TOTAL=0
+  devtools::_bun_tnpm > /dev/null 2>&1
+
+  unset -f command
+  export HOME="$old_home"
+  [ "$_DEV_BUNTNPM_TOTAL" -gt 0 ]
 }

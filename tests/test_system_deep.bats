@@ -24,13 +24,27 @@ teardown() {
   rm -rf "$TEST_HOME"
 }
 
-@test "system_deep::_broken_preferences: removes invalid non-Apple plist" {
-  local plist="$HOME/Library/Preferences/com.example.bad.plist"
-  echo "not plist content" > "$plist"
+@test "system_deep::_os_installer_leftovers: targets installers in Downloads" {
+  mkdir -p "$HOME/Downloads/Install macOS Test.app/Contents"
+  echo "fake app" > "$HOME/Downloads/Install macOS Test.app/Contents/file"
 
-  run system_deep::_broken_preferences
-  [ "$status" -eq 0 ]
-  [ ! -e "$plist" ]
+  # Mock pgrep to return 1 (not running)
+  pgrep() { return 1; }
+  export -f pgrep
+
+  # Mock stat to return a timestamp from 2000 (definitely >14 days old)
+  stat() { echo 946684800; }
+  export -f stat
+
+  DRY_RUN=true
+  TOTAL_DRYRUN_BYTES=0
+  _SYSTEM_DEEP_TOTAL=0
+
+  system_deep::_os_installer_leftovers > /dev/null 2>&1
+
+  unset -f pgrep
+  unset -f stat
+  [ "$TOTAL_DRYRUN_BYTES" -gt 0 ]
 }
 
 @test "system_deep::_safari_content_cache: dry-run reports and preserves cache" {

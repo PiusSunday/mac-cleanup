@@ -7,6 +7,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.4.1] - 2026-03-14
+
+### Added
+
+- **Deep Clean**: `/private/var/folders` temporary item cleanup.
+- **Deep Clean**: MacOS Installer (`.app` and `.pkg`) abandoned payload sweeping (age-gated >14 days).
+- **System**: Broken `.plist` preferences detection via `plutil -lint`.
+- **Browsers**: Expanded Arc browser targets and added Safari cache cleaning.
+- **Developer**: Bun / `tnpm` cache support.
+- **Developer**: Gradle caches now age-gated to >30 days.
+
+### Changed
+
+- **CLI**: Unified Logs `sudo` prompt now provides explicit explanation before elevating access.
+- **CLI**: Pre-flight checks correctly follow the mode banner and system context.
+- **CLI**: Summary table columns standardized to fixed widths for alignment.
+- **CLI**: Status labels are mode-aware (`Clean` vs `✔ Done`).
+
+### Fixed
+
+- **Core**: Dry-run reporting bug where skipped bytes artificially bloated the projected totals.
+- **System**: `.DS_Store` verbose output spam suppressed to a single summary line.
+
 ## [0.4.0] - 2026-03-14
 
 ### Added

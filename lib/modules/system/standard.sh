@@ -24,6 +24,9 @@ system::clean() {
   system::_dev_tool_caches
   module_scanned=$(( module_scanned + _SYS_DEVCACHE_TOTAL ))
 
+  system::_var_folders
+  module_scanned=$(( module_scanned + _SYS_VARFOLDERS_TOTAL ))
+
   system::_system_data_clues
 
   local disk_after
@@ -59,6 +62,7 @@ _SYS_CRASH_TOTAL=0
 _SYS_DSSTORE_TOTAL=0
 _SYS_TRASH_TOTAL=0
 _SYS_DEVCACHE_TOTAL=0
+_SYS_VARFOLDERS_TOTAL=0
 _SYS_HAS_CLUES=false
 
 # ── a) Crash reports ─────────────────────────────────────────────────────────
@@ -114,7 +118,7 @@ system::_ds_store() {
     fbytes=$(utils::get_size_bytes "$file")
     total_bytes=$(( total_bytes + fbytes ))
     (( count++ )) || true
-    if ! safe_rm "$file" ".DS_Store"; then
+    if ! safe_rm "$file" ".DS_Store" "silent"; then
       (( skipped++ )) || true
       total_bytes=$(( total_bytes - fbytes ))
     fi
@@ -343,7 +347,39 @@ system::_dev_tool_caches() {
   fi
 }
 
-# ── e) System Data clues (informational only — NEVER delete) ─────────────────
+# ── e) var/folders temporary items ───────────────────────────────────────────
+system::_var_folders() {
+  _SYS_VARFOLDERS_TOTAL=0
+
+  # Get the current user's var/folders prefix
+  local user_tmp
+  user_tmp=$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)
+  [[ -n "$user_tmp" && -d "$user_tmp" ]] || return 0
+
+  local total=0
+
+  # Only clean known-safe subdirs, never the root
+  local -a safe_subdirs=("TemporaryItems" "Cleanup At Startup" "-Tmp-")
+  for subdir in "${safe_subdirs[@]}"; do
+    # Find matching dirs under var/folders (one level of UUID dirs)
+    while IFS= read -r target; do
+      [[ -d "$target" ]] || continue
+      local size
+      size=$(utils::get_size_bytes "$target")
+      (( size > 0 )) || continue
+      log::verbose "  var/folders temp: $(utils::format_bytes "$size") ($subdir)"
+      safe_rm "$target" "var/folders temp ($subdir)" "silent"
+      total=$(( total + size ))
+    done < <(find /private/var/folders -maxdepth 4 -name "$subdir" -type d 2>/dev/null || true)
+  done
+
+  _SYS_VARFOLDERS_TOTAL=$total
+  if (( total > 0 )); then
+    log::info "var/folders temp: $(utils::format_bytes "$total")"
+  fi
+}
+
+# ── f) System Data clues (informational only — NEVER delete) ─────────────────
 system::_system_data_clues() {
   _SYS_HAS_CLUES=false
   local found_any=false

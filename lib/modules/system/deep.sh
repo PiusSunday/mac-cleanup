@@ -14,13 +14,18 @@ system_deep::clean() {
   local disk_before
   disk_before=$(utils::get_free_bytes)
 
+  if ! sudo -n true 2>/dev/null; then
+    log::info "Deep System cleanup targets require administrator privileges."
+    log::info "If prompted, please authenticate to allow full log clearing."
+    sudo -v 2>/dev/null || log::warn "Sudo access denied/skipped. Protected items will be skipped."
+  fi
+
   system_deep::_unified_logs
   system_deep::_power_logs
   system_deep::_memory_exception_reports
   system_deep::_var_log_rotated
   system_deep::_private_tmp
   system_deep::_os_installer_leftovers
-  system_deep::_broken_preferences
   system_deep::_safari_content_cache
   system_deep::_browser_code_sign_caches
 
@@ -123,8 +128,10 @@ system_deep::_private_tmp() {
 
 system_deep::_os_installer_leftovers() {
   local installer
-  for installer in /Applications/Install\ macOS*.app; do
-    [[ -d "$installer" ]] || continue
+  # Enable nullglob to avoid literal output if no match
+  shopt -s nullglob
+  for installer in /Applications/Install\ macOS*.app ~/Downloads/Install\ macOS*.app ~/Downloads/Install*.pkg; do
+    [[ -e "$installer" ]] || continue
 
     if pgrep -f "$installer" >/dev/null 2>&1; then
       continue
@@ -139,8 +146,9 @@ system_deep::_os_installer_leftovers() {
     local size
     size=$(utils::get_size_bytes "$installer")
     system_deep::_add_scanned "$size"
-    safe_rm "$installer" "Old macOS installer"
+    safe_rm "$installer" "Old macOS installer: $(basename "$installer")"
   done
+  shopt -u nullglob
 
   if [[ -d "/macOS Install Data" ]]; then
     local age_days
@@ -152,31 +160,6 @@ system_deep::_os_installer_leftovers() {
       safe_rm "/macOS Install Data" "macOS Install Data" "sudo"
     fi
   fi
-}
-
-system_deep::_broken_preferences() {
-  local prefs="$HOME/Library/Preferences"
-  [[ -d "$prefs" ]] || return 0
-
-  while IFS= read -r plist; do
-    [[ -f "$plist" ]] || continue
-    local name
-    name=$(basename "$plist")
-    case "$name" in
-      com.apple.*|.GlobalPreferences*|loginwindow.plist)
-        continue
-        ;;
-    esac
-
-    if plutil -lint "$plist" >/dev/null 2>&1; then
-      continue
-    fi
-
-    local size
-    size=$(utils::get_size_bytes "$plist")
-    system_deep::_add_scanned "$size"
-    safe_rm "$plist" "Corrupted preference"
-  done < <(find "$prefs" -maxdepth 1 -name "*.plist" -type f 2>/dev/null || true)
 }
 
 system_deep::_safari_content_cache() {

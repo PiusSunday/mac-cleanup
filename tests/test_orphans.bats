@@ -47,3 +47,13 @@ teardown() {
   [ "$status" -eq 0 ]
   [ ! -e "$orphan_dir" ]
 }
+
+@test "orphans::_broken_plists: detects corrupt plists" {
+  local bad_plist="$HOME/Library/Preferences/com.example.bad.plist"
+  echo "not valid xml or binary" > "$bad_plist"
+
+  run orphans::_broken_plists
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Corrupt plist"* ]]
+}
