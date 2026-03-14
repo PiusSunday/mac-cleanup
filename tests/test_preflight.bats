@@ -2,9 +2,9 @@
 # tests/test_preflight.bats — Unit tests for lib/preflight.sh
 
 setup() {
-  source "$BATS_TEST_DIRNAME/../lib/core.sh"
-  source "$BATS_TEST_DIRNAME/../lib/utils.sh"
-  source "$BATS_TEST_DIRNAME/../lib/preflight.sh"
+  source "$BATS_TEST_DIRNAME/../lib/core/core.sh"
+  source "$BATS_TEST_DIRNAME/../lib/core/utils.sh"
+  source "$BATS_TEST_DIRNAME/../lib/core/preflight.sh"
 
   DRY_RUN=false
   SKIP_CONFIRM=true

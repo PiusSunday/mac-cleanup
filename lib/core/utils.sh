@@ -508,11 +508,26 @@ utils::register_module() {
   local scanned="${3:-0}"
   local freed="${4:-0}"
   local status="${5:-clean}"
+  local projected="${6:-}"
+
+  if [[ -z "$projected" ]]; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+      if [[ "$status" =~ ^[0-9]+$ ]]; then
+        projected="$status"
+      else
+        projected="0"
+      fi
+    else
+      projected="$freed"
+    fi
+  fi
+
   MODULE_NAMES+=("$name")
   MODULE_CATEGORIES+=("$category")
   MODULE_SCANNED+=("$scanned")
   MODULE_FREED+=("$freed")
   MODULE_STATUS+=("$status")
+  MODULE_PROJECTED+=("$projected")
 }
 
 # ── Category header ──────────────────────────────────────────────────────────

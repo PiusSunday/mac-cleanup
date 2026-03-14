@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # lib/system_deep.sh — Deep age-gated system cleanup
 
-readonly DEEP_LOG_AGE_DAYS=30
+readonly DEEP_LOG_AGE_DAYS=14
 readonly DEEP_TMP_AGE_DAYS=7
 readonly DEEP_CRASH_AGE_DAYS=14
 
@@ -22,6 +22,7 @@ system_deep::clean() {
   system_deep::_os_installer_leftovers
   system_deep::_broken_preferences
   system_deep::_safari_content_cache
+  system_deep::_browser_code_sign_caches
 
   local disk_after
   disk_after=$(utils::get_free_bytes)
@@ -56,7 +57,13 @@ system_deep::_delete_by_find() {
 
   [[ -d "$base" ]] || return 0
 
-  local find_cmd=(find "$base" -type f)
+  local find_cmd=()
+  if [[ "$use_sudo" == "true" ]]; then
+    find_cmd=(sudo find "$base" -type f)
+  else
+    find_cmd=(find "$base" -type f)
+  fi
+  
   if (( $# > 0 )); then
     find_cmd+=("$@")
   fi
@@ -86,7 +93,7 @@ system_deep::_unified_logs() {
     size=$(utils::get_size_bytes "$file")
     system_deep::_add_scanned "$size"
     safe_rm "$file" "Unified log archive" "sudo"
-  done < <(find "$base" -type f \( -name "*.tracev3" -o -name "*.logdata" \) -mtime "+${DEEP_LOG_AGE_DAYS}" -print 2>/dev/null || true)
+  done < <(sudo find "$base" -type f \( -name "*.tracev3" -o -name "*.logdata" \) -mtime "+${DEEP_LOG_AGE_DAYS}" -print 2>/dev/null || true)
 }
 
 system_deep::_power_logs() {
@@ -107,7 +114,7 @@ system_deep::_var_log_rotated() {
     size=$(utils::get_size_bytes "$file")
     system_deep::_add_scanned "$size"
     safe_rm "$file" "Rotated system log" "sudo"
-  done < <(find "$base" -type f \( -name "*.gz" -o -name "*.asl" -o -name "*.log" \) -mtime "+${DEEP_LOG_AGE_DAYS}" -print 2>/dev/null || true)
+  done < <(sudo find "$base" -type f \( -name "*.gz" -o -name "*.asl" -o -name "*.log" \) -mtime "+${DEEP_LOG_AGE_DAYS}" -print 2>/dev/null || true)
 }
 
 system_deep::_private_tmp() {
@@ -180,4 +187,17 @@ system_deep::_safari_content_cache() {
   size=$(utils::get_size_bytes "$safari_cache")
   system_deep::_add_scanned "$size"
   safe_rm "$safari_cache" "Safari content cache"
+}
+
+system_deep::_browser_code_sign_caches() {
+  local base="/Library/Caches/com.apple.nsurlsessiond/Downloads"
+  [[ -d "$base" ]] || return 0
+
+  while IFS= read -r dir; do
+    [[ -n "$dir" ]] || continue
+    local size
+    size=$(utils::get_size_bytes "$dir")
+    system_deep::_add_scanned "$size"
+    safe_rm "$dir" "Browser code sign cache ($dir)" "sudo"
+  done < <(find "$base" -maxdepth 2 -type d \( -name "com.google.Chrome" -o -name "com.microsoft.edgemac" \) 2>/dev/null || true)
 }

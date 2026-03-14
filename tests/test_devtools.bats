@@ -2,9 +2,9 @@
 # tests/test_devtools.bats — Unit tests for lib/devtools.sh
 
 setup() {
-  source "$BATS_TEST_DIRNAME/../lib/core.sh"
-  source "$BATS_TEST_DIRNAME/../lib/utils.sh"
-  source "$BATS_TEST_DIRNAME/../lib/devtools.sh"
+  source "$BATS_TEST_DIRNAME/../lib/core/core.sh"
+  source "$BATS_TEST_DIRNAME/../lib/core/utils.sh"
+  source "$BATS_TEST_DIRNAME/../lib/modules/dev/devtools.sh"
   DRY_RUN=true
   VERBOSE=false
   SKIP_CONFIRM=true

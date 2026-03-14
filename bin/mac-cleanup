@@ -7,36 +7,45 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="${SCRIPT_DIR}/../lib"
 
 # ── Source core and utilities first ──────────────────────────────────────────
-# shellcheck source=../lib/core.sh
-source "${LIB_DIR}/core.sh"
-# shellcheck source=../lib/utils.sh
-source "${LIB_DIR}/utils.sh"
+# shellcheck source=../lib/core/core.sh
+source "${LIB_DIR}/core/core.sh"
+# shellcheck source=../lib/core/utils.sh
+source "${LIB_DIR}/core/utils.sh"
+# shellcheck source=../lib/core/preflight.sh
+source "${LIB_DIR}/core/preflight.sh"
 
 # ── Source all modules ────────────────────────────────────────────────────────
-# shellcheck source=../lib/system.sh
-source "${LIB_DIR}/system.sh"
-# shellcheck source=../lib/system_deep.sh
-source "${LIB_DIR}/system_deep.sh"
-# shellcheck source=../lib/xcode.sh
-source "${LIB_DIR}/xcode.sh"
-# shellcheck source=../lib/docker.sh
-source "${LIB_DIR}/docker.sh"
-# shellcheck source=../lib/devtools.sh
-source "${LIB_DIR}/devtools.sh"
-# shellcheck source=../lib/devops_reset.sh
-source "${LIB_DIR}/devops_reset.sh"
-# shellcheck source=../lib/snapshots.sh
-source "${LIB_DIR}/snapshots.sh"
-# shellcheck source=../lib/caches.sh
-source "${LIB_DIR}/caches.sh"
-# shellcheck source=../lib/brew.sh
-source "${LIB_DIR}/brew.sh"
-# shellcheck source=../lib/preflight.sh
-source "${LIB_DIR}/preflight.sh"
-# shellcheck source=../lib/orphans.sh
-source "${LIB_DIR}/orphans.sh"
-# shellcheck source=../lib/mail.sh
-source "${LIB_DIR}/mail.sh"
+# shellcheck source=../lib/modules/system/standard.sh
+source "${LIB_DIR}/modules/system/standard.sh"
+# shellcheck source=../lib/modules/system/deep.sh
+source "${LIB_DIR}/modules/system/deep.sh"
+# shellcheck source=../lib/modules/system/orphans.sh
+source "${LIB_DIR}/modules/system/orphans.sh"
+# shellcheck source=../lib/modules/system/brew.sh
+source "${LIB_DIR}/modules/system/brew.sh"
+# shellcheck source=../lib/modules/system/snapshots.sh
+source "${LIB_DIR}/modules/system/snapshots.sh"
+
+# shellcheck source=../lib/modules/user/standard.sh
+source "${LIB_DIR}/modules/user/standard.sh"
+# shellcheck source=../lib/modules/user/mail.sh
+source "${LIB_DIR}/modules/user/mail.sh"
+# shellcheck source=../lib/modules/user/browsers.sh
+source "${LIB_DIR}/modules/user/browsers.sh"
+# shellcheck source=../lib/modules/user/apps.sh
+source "${LIB_DIR}/modules/user/apps.sh"
+
+# shellcheck source=../lib/modules/dev/devtools.sh
+source "${LIB_DIR}/modules/dev/devtools.sh"
+# shellcheck source=../lib/modules/dev/xcode.sh
+source "${LIB_DIR}/modules/dev/xcode.sh"
+# shellcheck source=../lib/modules/dev/devops.sh
+source "${LIB_DIR}/modules/dev/devops.sh"
+# shellcheck source=../lib/modules/dev/docker.sh
+source "${LIB_DIR}/modules/dev/docker.sh"
+
+# shellcheck source=../lib/optimize/optimize.sh
+source "${LIB_DIR}/optimize/optimize.sh"
 
 # ── Help output ───────────────────────────────────────────────────────────────
 show_help() {
@@ -57,6 +66,7 @@ ${BOLD}TARGETS:${RESET}
   --caches, -c       Clear ~/Library/Caches, Zsh, Spotify, JetBrains, and app caches
   --mail, -m         Clean old Mail downloads and recent-item metadata
   --brew, -b         Run brew cleanup and autoremove
+  --optimize, -O     Run system optimizations (DNS flush, LS rebuild, SQLite vacuum)
   --all, -a          Run all cleanup targets
 
 ${BOLD}OPTIONS:${RESET}
@@ -98,6 +108,7 @@ parse_flags() {
     TARGET_BREW=true
     TARGET_MAIL=true
     TARGET_SYSTEM_DEEP=true
+    TARGET_OPTIMIZE=false
     log::warn "No flags provided. Running --all --dry-run by default."
     return
   fi
@@ -132,6 +143,9 @@ parse_flags() {
         ;;
       --brew|-b)
         TARGET_BREW=true
+        ;;
+      --optimize|-O)
+        TARGET_OPTIMIZE=true
         ;;
       --all|-a)
         TARGET_SYSTEM=true
@@ -226,14 +240,14 @@ print_report() {
 
   # ── Column headers ──
   local separator
-  separator=$(printf '─%.0s' $(seq 1 50))
-  printf '  %s%-18s %-13s %-10s %s%s\n' \
-    "${BOLD}" "Category" "Module" "Scanned" "Status${RESET}" ""
+  separator=$(printf '─%.0s' $(seq 1 77))
+  printf '  %s%-18s %-15s %11s %13s   %s%s\n' \
+    "${BOLD}" "Category" "Module" "Found" "Reclaimable" "Status" "${RESET}"
   printf '  %s\n' "$separator"
 
   # ── Per-module rows ──
   local total_scanned=0
-  local total_freed_calc=0
+  local total_projected=0
   local module_count=${#MODULE_NAMES[@]}
 
   if (( module_count == 0 )); then
@@ -244,82 +258,54 @@ print_report() {
       local name="${MODULE_NAMES[$i]}"
       local category="${MODULE_CATEGORIES[$i]}"
       local scanned="${MODULE_SCANNED[$i]}"
-      local freed="${MODULE_FREED[$i]}"
       local status="${MODULE_STATUS[$i]}"
+      local projected="${MODULE_PROJECTED[$i]:-0}"
 
       total_scanned=$(( total_scanned + scanned ))
-      total_freed_calc=$(( total_freed_calc + freed ))
+      total_projected=$(( total_projected + projected ))
 
-      # Format scanned
-      local scanned_fmt
-      if (( scanned == 0 )); then
-        scanned_fmt="—"
-      else
-        scanned_fmt=$(utils::format_bytes "$scanned")
-      fi
-
-      # Format status
-      local status_fmt
-      case "$status" in
-        clean)   status_fmt="${GREEN}✔ Clean${RESET}" ;;
-        skipped) status_fmt="${YELLOW}⚠ Skipped${RESET}" ;;
-        review)  status_fmt="${CYAN}💡 Review${RESET}" ;;
-        *)
-          # Numeric = reclaimable bytes
-          if [[ "$status" =~ ^[0-9]+$ ]] && (( status > 0 )); then
-            status_fmt="${GREEN}🗑 $(utils::format_bytes "$status")${RESET}"
-          else
-            status_fmt="${GREEN}✔ Clean${RESET}"
-          fi
-          ;;
-      esac
-
-      # Show category only on first row of each category group
       local cat_display=""
       if [[ "$category" != "$prev_category" ]]; then
         cat_display="$category"
         prev_category="$category"
       fi
 
-      printf '  %-18s %-13s %-10s %s\n' "$cat_display" "$name" "$scanned_fmt" "$status_fmt"
+      local found_fmt="-"
+      if (( scanned > 0 )); then
+        found_fmt=$(utils::format_bytes "$scanned")
+      fi
+
+      local reclaimable_fmt="-"
+      if (( projected > 0 )); then
+        reclaimable_fmt=$(utils::format_bytes "$projected")
+      elif [[ "$status" == "review" ]]; then
+        reclaimable_fmt="0 B"
+      fi
+
+      local status_fmt="${GREEN}Clean${RESET}"
+      case "$status" in
+        skipped)
+          status_fmt="${YELLOW}Skipped${RESET}"
+          ;;
+        review)
+          status_fmt="${CYAN}Needs review${RESET}"
+          ;;
+      esac
+
+      printf '  %-18s %-15s %11s %13s   %s\n' \
+        "$cat_display" "$name" "$found_fmt" "$reclaimable_fmt" "$status_fmt"
     done
   fi
 
   # ── Total row ──
   printf '  %s\n' "$separator"
 
-  local total_scanned_fmt
-  total_scanned_fmt=$(utils::format_bytes "$total_scanned")
+  local total_found_fmt total_reclaimable_fmt
+  total_found_fmt=$(utils::format_bytes "$total_scanned")
+  total_reclaimable_fmt=$(utils::format_bytes "$total_projected")
 
-  # Aggregate TOTAL status by priority: 🗑 > ⚠ > 💡 > ✔
-  local total_status
-  local has_freed=false has_skipped=false has_review=false
-  for (( i=0; i<module_count; i++ )); do
-    local st="${MODULE_STATUS[$i]}"
-    case "$st" in
-      clean) ;;
-      skipped) has_skipped=true ;;
-      review) has_review=true ;;
-      *)
-        if [[ "$st" =~ ^[0-9]+$ ]] && (( st > 0 )); then
-          has_freed=true
-        fi
-        ;;
-    esac
-  done
-
-  if [[ "$has_freed" == "true" ]]; then
-    total_status="${GREEN}🗑 $(utils::format_bytes "$total_scanned")${RESET}"
-  elif [[ "$has_skipped" == "true" ]]; then
-    total_status="${YELLOW}⚠ Partial${RESET}"
-  elif [[ "$has_review" == "true" ]]; then
-    total_status="${CYAN}💡 Review${RESET}"
-  else
-    total_status="${GREEN}✔ Clean${RESET}"
-  fi
-
-  printf '  %s%-18s %-13s %-10s%s %s\n' \
-    "${BOLD}" "TOTAL" "" "$total_scanned_fmt" "${RESET}" "$total_status"
+  printf '  %s%-18s %-15s %11s %13s%s\n' \
+    "${BOLD}" "TOTALS" "" "$total_found_fmt" "$total_reclaimable_fmt" "${RESET}"
 
   # ── Footer ──
   printf '\n'
@@ -328,28 +314,23 @@ print_report() {
   free_after_fmt=$(utils::format_bytes "$disk_after")
 
   if [[ "$DRY_RUN" == "true" ]]; then
-    # Project using dry-run measured total from safe_rm
-    local projected=$(( disk_before + TOTAL_DRYRUN_BYTES ))
+    local projected=$(( disk_before + total_projected ))
     local projected_fmt
     projected_fmt=$(utils::format_bytes "$projected")
     printf '  Free space:  %s → %s (projected)\n' "$free_before_fmt" "$projected_fmt"
-    printf '  Dry-run total: %s\n' "$(utils::format_bytes "$TOTAL_DRYRUN_BYTES")"
   else
     printf '  Free space:  %s → %s\n' "$free_before_fmt" "$free_after_fmt"
-    printf '  Freed total: %s\n' "$(utils::format_bytes "$TOTAL_FREED")"
   fi
 
   printf '  Log saved:   %s\n' "$LOG_FILE"
+  printf '\n'
+  printf '  %sStatus legend:%s\n' "${BOLD}" "${RESET}"
+  printf '  - Needs review: found items are excluded from projected reclaimable bytes.\n'
+  printf '  - Clean: module will be cleaned automatically in a real run.\n'
+  printf '  - Skipped: prerequisite unavailable.\n'
   printf '%s%s%s%s\n\n' "${BOLD}" "${BLUE}" "$bar" "${RESET}"
 
-  local total_fmt
-  if [[ "$DRY_RUN" == "true" ]]; then
-    total_fmt=$(utils::format_bytes "$TOTAL_DRYRUN_BYTES")
-    log::success "Run complete. Dry-run total: ${total_fmt}"
-  else
-    total_fmt=$(utils::format_bytes "$TOTAL_FREED")
-    log::success "Run complete. Total freed: ${total_fmt}"
-  fi
+  log::success "Run complete."
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -402,7 +383,11 @@ main() {
   # ── Caches & Logs ──
   if [[ "$TARGET_CACHES" == "true" ]] || [[ "$TARGET_BREW" == "true" ]] || [[ "$TARGET_MAIL" == "true" ]]; then
     log::category "Caches & Logs"
-    [[ "$TARGET_CACHES" == "true" ]] && caches::clean
+    if [[ "$TARGET_CACHES" == "true" ]]; then
+      caches::clean
+      browsers::clean
+      apps::clean
+    fi
     [[ "$TARGET_MAIL" == "true" ]] && mail::clean
     [[ "$TARGET_BREW" == "true" ]]   && brew::clean
   fi
@@ -418,6 +403,11 @@ main() {
     snapshots::clean
   fi
 
+  # ── Optimization ──
+  if [[ "${TARGET_OPTIMIZE:-false}" == "true" ]]; then
+    optimize::run
+  fi
+
   # Snapshot free space after
   local disk_after
   disk_after=$(utils::get_free_bytes)
@@ -430,4 +420,6 @@ main() {
   print_report "$duration" "$disk_before" "$disk_after"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

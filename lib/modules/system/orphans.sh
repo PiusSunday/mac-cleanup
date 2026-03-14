@@ -42,11 +42,21 @@ orphans::clean() {
   module_summary "Orphans" "$_ORPHAN_TOTAL"
 
   local status="clean"
-  if (( _ORPHAN_TOTAL > 0 )); then
+  local projected=0
+  if [[ "$CLEAN_ORPHANS" == "true" ]]; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+      projected="$_ORPHAN_TOTAL"
+    else
+      projected="$freed"
+    fi
+    if (( projected > 0 )); then
+      status="$projected"
+    fi
+  elif (( _ORPHAN_TOTAL > 0 )); then
     status="review"
   fi
 
-  utils::register_module "Orphans" "System" "$_ORPHAN_TOTAL" "$freed" "$status"
+  utils::register_module "Orphans" "System" "$_ORPHAN_TOTAL" "$freed" "$status" "$projected"
 }
 
 orphans::_normalize_name() {

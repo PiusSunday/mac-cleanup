@@ -30,12 +30,14 @@ export DEVOPS_RESET_MODE=${DEVOPS_RESET_MODE:-false}
 export SHOW_OPERATION_LOG=${SHOW_OPERATION_LOG:-false}
 
 # Per-module reporting arrays
-# Each module registers: name, category, scanned bytes, freed bytes, status
+# Each module registers: name, category, scanned bytes, freed bytes, status,
+# and projected reclaimable bytes for the summary report.
 declare -a MODULE_NAMES=()
 declare -a MODULE_CATEGORIES=()
 declare -a MODULE_SCANNED=()
 declare -a MODULE_FREED=()
 declare -a MODULE_STATUS=()
+declare -a MODULE_PROJECTED=()
 
 # Paths that macOS SIP or system ownership protects — never attempt deletion
 # Adding a path here prevents all modules from queuing it for rm

@@ -166,24 +166,33 @@ mac-cleanup --show-log
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Mode: DRY-RUN  |  Duration: 3s
 
-  Category           Module        Scanned    Status
-  ──────────────────────────────────────────────────
-  System             System        1.2 GB     🗑 1.2 GB
-  Developer Tools    Xcode         42.3 GB    🗑 42.3 GB
-  Developer Tools    Docker        —          ⚠ Skipped
-  Developer Tools    Dev Artifacts 73.6 MB    🗑 73.6 MB
-  Caches & Logs      Caches        345.5 MB   🗑 345.5 MB
-  Caches & Logs      Homebrew      53.2 MB    🗑 53.2 MB
-  Storage Mgmt       Snapshots     —          ✔ Clean
-  ──────────────────────────────────────────────────
-  TOTAL                            43.8 GB    🗑 43.8 GB
+  Category           Module                Found   Reclaimable   Status
+  ─────────────────────────────────────────────────────────────────────────────
+  System             System               1.2 GB        1.2 GB   Clean
+                     Deep System               -             -   Clean
+                     Orphans                   -             -   Clean
+  Developer Tools    Xcode                42.3 GB       42.3 GB   Clean
+                     Docker                    -             -   Skipped
+                     Dev Artifacts         73.6 MB       73.6 MB   Clean
+  Caches & Logs      Caches              345.5 MB      345.5 MB   Clean
+                     Homebrew             53.2 MB       53.2 MB   Clean
+  Storage Management Snapshots                 -             -   Clean
+  ─────────────────────────────────────────────────────────────────────────────
+  TOTALS                                   43.8 GB       43.8 GB
 
   Free space:  331 GB → 374.8 GB (projected)
   Log saved:   ~/.mac-cleanup/cleanup.log
+
+  Status legend:
+  - Needs review: found items are excluded from projected reclaimable bytes.
+  - Clean: module will be cleaned automatically in a real run.
+  - Skipped: prerequisite unavailable.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-✔ Run complete. Total freed: 43.8 GB (DRY-RUN)
+✔ Run complete.
 ```
+
+`Found` is what each module detected. `Reclaimable` is what the current run would remove, or project to remove in dry-run mode. `Status` explains whether the module will run automatically, is waiting on user action, or was skipped.
 
 ---
 

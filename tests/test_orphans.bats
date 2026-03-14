@@ -9,9 +9,9 @@ setup() {
   mkdir -p "$HOME/Library/Containers"
   mkdir -p "$HOME/Library/Preferences"
 
-  source "$BATS_TEST_DIRNAME/../lib/core.sh"
-  source "$BATS_TEST_DIRNAME/../lib/utils.sh"
-  source "$BATS_TEST_DIRNAME/../lib/orphans.sh"
+  source "$BATS_TEST_DIRNAME/../lib/core/core.sh"
+  source "$BATS_TEST_DIRNAME/../lib/core/utils.sh"
+  source "$BATS_TEST_DIRNAME/../lib/modules/system/orphans.sh"
 
   DRY_RUN=true
   SKIP_CONFIRM=true
