@@ -15,11 +15,12 @@
 
 - **Xcode alone** can silently accumulate 50–100 GB in DerivedData, Archives, and DeviceSupport folders
 - **Docker Desktop** builds up image layers, stopped containers, and build cache that are never automatically cleaned
-- **System Data** in macOS Storage settings balloons with Time Machine local snapshots, crash reports, and `.DS_Store` files
+- **System Data** in macOS Storage settings balloons with Time Machine local snapshots, crash reports, and old installer payloads
+- **Browser Frameworks** (Chrome, Edge) leave Gigabytes of abandoned framework versions hiding in your Application Support
 - **Homebrew** keeps years of cached downloads even after packages are updated or removed
 - **Developer tools** (npm, pip, Go, Rust, Gradle) scatter caches and build artifacts across your home directory
 
-mac-cleanup gives you a single, safe command to reclaim all of it.
+mac-cleanup gives you a single, safe command to reclaim all of it, beautifully organized into a Domain-Driven architecture.
 
 ---
 
@@ -27,16 +28,17 @@ mac-cleanup gives you a single, safe command to reclaim all of it.
 
 | Flag             | Module        | What it targets                                                                                                                                                             | Typical Savings |
 | ---------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
-| `--system`       | System        | Crash reports, `.DS_Store`, Trash, npm/pip/Go caches, Google Cloud logs, Kubernetes cache, AWS CLI cache                                                                    | 1–5 GB          |
-| `--system-deep`  | Deep System   | Age-gated unified logs, power/memory diagnostics, rotated system logs, stale installer leftovers, broken preferences, Safari content cache                                  | 1–12 GB         |
-| `--xcode`        | Xcode         | DerivedData, Archives (90d+), iOS DeviceSupport, Simulators, documentation cache/index, CoreSimulator and device logs                                                       | 10–90 GB        |
+| `--system`       | System        | Crash reports, `.DS_Store`, Trash, Dev caches (npm, pip)                                                                                                                    | 1–5 GB          |
+| `--system-deep`  | Deep System   | Age-gated unified logs (14d), diagnostic logs, MacOS Installer payloads (14d), Safari content cache, `com.apple.nsurlsessiond`                                              | 1–12 GB         |
+| `--xcode`        | Xcode         | DerivedData, Archives (90d+), iOS DeviceSupport, Simulators, CoreSimulator logs     | 10–90 GB        |
 | `--docker`       | Docker        | Precision cleanup of stopped containers, dangling images, dangling volumes, build cache                                                                                     | 5–30 GB         |
-| `--devtools`     | Dev Artifacts | `node_modules` (orphaned), Rust `target/`, Cargo cache, `__pycache__`, modern Python caches, `.gradle`, Ruby Bundler/Gem, pnpm, Bun/tnpm, Flutter `build/` and `.dart_tool` | 5–60 GB         |
+| `--devtools`     | Dev Artifacts | `node_modules` (orphaned), Rust `target/`, Python `__pycache__`, Flutter, Gradle, Ruby caches         | 5–60 GB         |
+| `--snapshots`    | Snapshots     | Local Time Machine snapshots & stale `.inProgress` backups           | 5–20 GB         |
+| `--caches`       | Caches        | ~/Library/Caches, sandboxed app containers (safe skip of `com.apple.*`), Zsh, Spotify, JetBrains     | 2–15 GB         |
 | `--mail`         | Mail          | Old Mail Downloads attachments and recent-item metadata                                                                                                                     | 0.5–10 GB       |
-| `--snapshots`    | Snapshots     | Local Time Machine snapshots                                                                                                                                                | 5–20 GB         |
-| `--caches`       | Caches        | ~/Library/Caches, Browsers, sandboxed app container caches/tmp, Saved Application State, Antigravity, Oh My Zsh, ~/Library/Logs contents, Spotify, JetBrains, Apple media   | 2–15 GB         |
 | `--brew`         | Homebrew      | Cached downloads, outdated versions, unused dependencies                                                                                                                    | 1–5 GB          |
 | `--devops-reset` | DevOps Reset  | Cross-ecosystem deep cleanup for Docker and language toolchains; optional model caches with `--include-ml-models`                                                           | 10–120+ GB      |
+| `--optimize`     | Optimization  | DNS flush (`dscacheutil`), LaunchServices rebuild, SQLite VACUUM for Safari/Messages, Font cache clear                                                                      | N/A          |
 
 ### System Data clues
 
@@ -73,7 +75,7 @@ If you prefer to clone the repository and run directly — no installation requi
 git clone https://github.com/PiusSunday/mac-cleanup.git
 cd mac-cleanup
 chmod +x bin/mac-cleanup
-./bin/mac-cleanup --all          # dry-run by default — safe to run anytime
+./bin/mac-cleanup          # Runs safe --all --dry-run by default
 ```
 
 Optionally, symlink it so you can run `mac-cleanup` from anywhere:
@@ -100,17 +102,15 @@ bats tests/
 ## Usage
 
 ```bash
-# Preview all cleanups — safe to run anytime (DEFAULT: dry-run)
+# Preview all cleanups — safe to run anytime (Implies --all --dry-run)
+mac-cleanup
+
+# Preview specific targets 
+mac-cleanup --all --dry-run
+mac-cleanup --xcode --docker --dry-run
+
+# Interactive live cleanup (asks for confirmation)
 mac-cleanup --all
-
-# Preview Xcode + Docker cleanup
-mac-cleanup --xcode --docker
-
-# Scan system artifacts only
-mac-cleanup --system
-
-# Find orphaned build artifacts
-mac-cleanup --devtools
 
 # Actually clean everything, skip prompts (live mode)
 mac-cleanup --all --yes
@@ -128,9 +128,8 @@ mac-cleanup --all --clean-orphans --yes
 mac-cleanup --show-log
 ```
 
-> **Note:** mac-cleanup runs in DRY-RUN mode by default and will NOT delete anything.
-> To perform actual cleanup, run without `--dry-run`. You will be prompted for confirmation
-> unless `--yes` is also passed.
+> **Note:** If you run `mac-cleanup` with **no flags**, it defaults to a safe `--all --dry-run` preview.
+> If you specify target flags (like `--all` or `--system`) *without* passing `--dry-run`, it enters **Interactive Mode** and will prompt you for confirmation before deleting any files. Pass `--yes` to skip the prompt.
 
 ### Expected output
 
@@ -209,12 +208,13 @@ mac-cleanup --show-log
 | `--snapshots`         | `-s`  | false    | Remove local Time Machine snapshots                                                             |
 | `--caches`            | `-c`  | false    | Clear user caches/logs, browser caches, container caches, Saved App State, media and IDE caches |
 | `--brew`              | `-b`  | false    | Run Homebrew cleanup                                                                            |
+| `--optimize`          | `-O`  | false    | Run non-destructive system tuning operations (DNS flush, LS rebuild, SQLite VACUUM)             |
 | `--all`               | `-a`  | false    | Run all cleanup targets                                                                         |
 | `--clean-orphans`     | —     | false    | Delete orphan candidates after per-item confirmation                                            |
 | `--devops-reset`      | —     | false    | Run nuclear cleanup mode across Docker and developer ecosystems                                 |
 | `--include-ml-models` | —     | false    | Include `.cache/huggingface` and `.ollama/models` in DevOps reset                               |
 | `--show-log`          | —     | false    | Print operation log from `~/.mac-cleanup/operations.log` and exit                               |
-| `--dry-run`           | `-n`  | **true** | Preview only — no deletions                                                                     |
+| `--dry-run`           | `-n`  | —        | Preview only — no deletions (implicitly true when run without any target flags)                 |
 | `--yes`               | `-y`  | false    | Skip confirmation and run live cleanup                                                          |
 | `--verbose`           | `-v`  | false    | Show detailed output                                                                            |
 | `--help`              | `-h`  | —        | Show help message                                                                               |
@@ -225,9 +225,11 @@ mac-cleanup --show-log
 
 ## Safety
 
-⚠️ **By default, mac-cleanup runs in DRY-RUN mode and will NOT delete anything.**
+⚠️ **Interactive by Default**
+If you pass targets (e.g. `--all`) to mac-cleanup, it will **prompt you for confirmation** before doing any live deletion.
+If you run `mac-cleanup` entirely without flags, it defaults to a safe `--all --dry-run` preview.
 
-To perform actual cleanup, run without `--dry-run`. A prominent warning banner will appear, and you will be prompted for confirmation. Pass `--yes` to skip the prompt and proceed directly with live cleanup.
+To skip prompts and force live cleanup, pass `--yes`.
 
 ### What it will NEVER touch
 
