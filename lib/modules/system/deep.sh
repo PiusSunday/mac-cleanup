@@ -6,18 +6,28 @@ readonly DEEP_TMP_AGE_DAYS=7
 readonly DEEP_CRASH_AGE_DAYS=14
 
 _SYSTEM_DEEP_TOTAL=0
+_SYSTEM_DEEP_CAN_USE_SUDO=false
 
 system_deep::clean() {
   log::section "Deep System Cleanup"
 
   _SYSTEM_DEEP_TOTAL=0
+  _SYSTEM_DEEP_CAN_USE_SUDO=false
   local disk_before
   disk_before=$(utils::get_free_bytes)
 
-  if ! sudo -n true 2>/dev/null; then
+  if sudo -n true 2>/dev/null; then
+    _SYSTEM_DEEP_CAN_USE_SUDO=true
+  elif [[ "$DRY_RUN" == "true" ]]; then
+    log::verbose "Deep System dry-run: skipping sudo authentication; protected items may be omitted."
+  else
     log::info "Deep System cleanup targets require administrator privileges."
     log::info "If prompted, please authenticate to allow full log clearing."
-    sudo -v 2>/dev/null || log::warn "Sudo access denied/skipped. Protected items will be skipped."
+    if sudo -v 2>/dev/null; then
+      _SYSTEM_DEEP_CAN_USE_SUDO=true
+    else
+      log::warn "Sudo access denied/skipped. Protected items will be skipped."
+    fi
   fi
 
   system_deep::_unified_logs
@@ -63,7 +73,7 @@ system_deep::_delete_by_find() {
   [[ -d "$base" ]] || return 0
 
   local find_cmd=()
-  if [[ "$use_sudo" == "true" ]]; then
+  if [[ "$use_sudo" == "true" && "${_SYSTEM_DEEP_CAN_USE_SUDO:-false}" == "true" ]]; then
     find_cmd=(sudo find "$base" -type f)
   else
     find_cmd=(find "$base" -type f)
@@ -79,7 +89,7 @@ system_deep::_delete_by_find() {
     local size
     size=$(utils::get_size_bytes "$file")
     system_deep::_add_scanned "$size"
-    if [[ "$use_sudo" == "true" ]]; then
+    if [[ "$use_sudo" == "true" && "${_SYSTEM_DEEP_CAN_USE_SUDO:-false}" == "true" ]]; then
       safe_rm "$file" "$label" "sudo"
     else
       safe_rm "$file" "$label"
@@ -97,8 +107,18 @@ system_deep::_unified_logs() {
     local size
     size=$(utils::get_size_bytes "$file")
     system_deep::_add_scanned "$size"
-    safe_rm "$file" "Unified log archive" "sudo"
-  done < <(sudo find "$base" -type f \( -name "*.tracev3" -o -name "*.logdata" \) -mtime "+${DEEP_LOG_AGE_DAYS}" -print 2>/dev/null || true)
+    if [[ "${_SYSTEM_DEEP_CAN_USE_SUDO:-false}" == "true" ]]; then
+      safe_rm "$file" "Unified log archive" "sudo"
+    else
+      safe_rm "$file" "Unified log archive"
+    fi
+  done < <(
+    if [[ "${_SYSTEM_DEEP_CAN_USE_SUDO:-false}" == "true" ]]; then
+      sudo find "$base" -type f \( -name "*.tracev3" -o -name "*.logdata" \) -mtime "+${DEEP_LOG_AGE_DAYS}" -print 2>/dev/null || true
+    else
+      find "$base" -type f \( -name "*.tracev3" -o -name "*.logdata" \) -mtime "+${DEEP_LOG_AGE_DAYS}" -print 2>/dev/null || true
+    fi
+  )
 }
 
 system_deep::_power_logs() {
@@ -118,8 +138,18 @@ system_deep::_var_log_rotated() {
     local size
     size=$(utils::get_size_bytes "$file")
     system_deep::_add_scanned "$size"
-    safe_rm "$file" "Rotated system log" "sudo"
-  done < <(sudo find "$base" -type f \( -name "*.gz" -o -name "*.asl" -o -name "*.log" \) -mtime "+${DEEP_LOG_AGE_DAYS}" -print 2>/dev/null || true)
+    if [[ "${_SYSTEM_DEEP_CAN_USE_SUDO:-false}" == "true" ]]; then
+      safe_rm "$file" "Rotated system log" "sudo"
+    else
+      safe_rm "$file" "Rotated system log"
+    fi
+  done < <(
+    if [[ "${_SYSTEM_DEEP_CAN_USE_SUDO:-false}" == "true" ]]; then
+      sudo find "$base" -type f \( -name "*.gz" -o -name "*.asl" -o -name "*.log" \) -mtime "+${DEEP_LOG_AGE_DAYS}" -print 2>/dev/null || true
+    else
+      find "$base" -type f \( -name "*.gz" -o -name "*.asl" -o -name "*.log" \) -mtime "+${DEEP_LOG_AGE_DAYS}" -print 2>/dev/null || true
+    fi
+  )
 }
 
 system_deep::_private_tmp() {
@@ -157,7 +187,11 @@ system_deep::_os_installer_leftovers() {
       local size
       size=$(utils::get_size_bytes "/macOS Install Data")
       system_deep::_add_scanned "$size"
-      safe_rm "/macOS Install Data" "macOS Install Data" "sudo"
+      if [[ "${_SYSTEM_DEEP_CAN_USE_SUDO:-false}" == "true" ]]; then
+        safe_rm "/macOS Install Data" "macOS Install Data" "sudo"
+      else
+        safe_rm "/macOS Install Data" "macOS Install Data"
+      fi
     fi
   fi
 }
@@ -181,6 +215,10 @@ system_deep::_browser_code_sign_caches() {
     local size
     size=$(utils::get_size_bytes "$dir")
     system_deep::_add_scanned "$size"
-    safe_rm "$dir" "Browser code sign cache ($dir)" "sudo"
+    if [[ "${_SYSTEM_DEEP_CAN_USE_SUDO:-false}" == "true" ]]; then
+      safe_rm "$dir" "Browser code sign cache ($dir)" "sudo"
+    else
+      safe_rm "$dir" "Browser code sign cache ($dir)"
+    fi
   done < <(find "$base" -maxdepth 2 -type d \( -name "com.google.Chrome" -o -name "com.microsoft.edgemac" \) 2>/dev/null || true)
 }

@@ -126,10 +126,13 @@ mac-cleanup --all --clean-orphans --yes
 
 # Show operation log
 mac-cleanup --show-log
+
+# Show current version
+mac-cleanup --version
 ```
 
-> **Note:** If you run `mac-cleanup` with **no flags**, it defaults to a safe `--all --dry-run` preview.
-> If you specify target flags (like `--all` or `--system`) _without_ passing `--dry-run`, it enters **Interactive Mode** and will prompt you for confirmation before deleting any files. Pass `--yes` to skip the prompt.
+> **Note:** If you run `mac-cleanup` with **no cleanup targets** selected, it defaults to a safe `--all --dry-run` preview.
+> Modifier-only flags like `--verbose` and `--clean-orphans` keep that safe preview behavior. If you specify cleanup targets (like `--all` or `--system`) _without_ passing `--dry-run`, it enters **Interactive Mode** and will prompt you for confirmation before deleting any files. Pass `--yes` to skip the prompt.
 
 ### Expected output
 
@@ -215,6 +218,7 @@ mac-cleanup --show-log
 | `--devops-reset`      | —     | false   | Run nuclear cleanup mode across Docker and developer ecosystems                                 |
 | `--include-ml-models` | —     | false   | Include `.cache/huggingface` and `.ollama/models` in DevOps reset                               |
 | `--show-log`          | —     | false   | Print operation log from `~/.mac-cleanup/operations.log` and exit                               |
+| `--version`           | `-V`  | false   | Print the current mac-cleanup version and exit                                                  |
 | `--dry-run`           | `-n`  | —       | Preview only — no deletions (implicitly true when run without any target flags)                 |
 | `--yes`               | `-y`  | false   | Skip confirmation and run live cleanup                                                          |
 | `--verbose`           | `-v`  | false   | Show detailed output                                                                            |

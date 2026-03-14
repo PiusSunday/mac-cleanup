@@ -17,6 +17,13 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
+      - name: Ensure tag commit is on main
+        run: |
+          git fetch origin main --depth=1
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Tagged commit is not on main. Release is restricted to tags from main."
+            exit 1
+          fi
       - name: Install test dependencies
         run: brew install shellcheck bats-core
       - name: Run ShellCheck

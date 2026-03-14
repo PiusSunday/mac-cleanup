@@ -16,6 +16,14 @@ else
   exit 1
 fi
 
+echo "Testing --version..."
+if "$BIN" --version | grep -q "mac-cleanup v"; then
+  echo "✔ --version works"
+else
+  echo "✘ --version failed"
+  exit 1
+fi
+
 echo "Testing --dry-run --all --yes (should not delete anything)..."
 if "$BIN" --dry-run --all --yes > /dev/null; then
   echo "✔ --dry-run --all --yes works"
@@ -48,6 +56,14 @@ else
   exit 1
 fi
 
+echo "Testing --verbose defaults to safe dry-run execution..."
+if bash -c 'source "$1" && parse_flags --verbose >/dev/null 2>&1 && [[ "$VERBOSE" == "true" && "$DRY_RUN" == "true" && "$TARGET_SYSTEM" == "true" ]]' _ "$BIN"; then
+  echo "✔ --verbose works as a safe modifier"
+else
+  echo "✘ --verbose failed"
+  exit 1
+fi
+
 echo "Testing --all --dry-run --yes contains Summary Report..."
 output=$("$BIN" --all --dry-run --yes 2>&1)
 if echo "$output" | grep -q "Summary Report"; then
@@ -71,6 +87,14 @@ if echo "$output" | grep -q "\-\-yes"; then
   echo "✔ --help documents --yes flag"
 else
   echo "✘ --help missing --yes flag"
+  exit 1
+fi
+
+echo "Testing --help documents --version flag..."
+if echo "$output" | grep -q "\-\-version"; then
+  echo "✔ --help documents --version flag"
+else
+  echo "✘ --help missing --version flag"
   exit 1
 fi
 
