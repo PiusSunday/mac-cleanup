@@ -13,6 +13,7 @@ browsers::clean() {
   browsers::_chrome_versions
   browsers::_edge_versions
   browsers::_safari_icons
+  browsers::_safari_cache
   browsers::_arc
   browsers::_zen
 
@@ -78,13 +79,31 @@ browsers::_safari_icons() {
   safe_rm_contents "$cache" "Safari Favicon Cache"
 }
 
-browsers::_arc() {
-  local cache="$HOME/Library/Caches/company.thebrowser.Browser"
+browsers::_safari_cache() {
+  local cache="$HOME/Library/Caches/com.apple.Safari"
   [[ -d "$cache" ]] || return 0
   local size
   size=$(utils::get_size_bytes "$cache")
   browsers::_add_scanned "$size"
-  safe_rm "$cache" "Arc Browser Cache"
+  safe_rm "$cache" "Safari Cache"
+}
+
+browsers::_arc() {
+  local -a arc_paths=(
+    "$HOME/Library/Caches/company.thebrowser.Browser"
+    "$HOME/Library/Application Support/Arc/User Data/Default/Cache/Cache_Data"
+    "$HOME/Library/Application Support/Arc/User Data/Default/GPUCache"
+    "$HOME/Library/Application Support/Arc/User Data/Default/Code Cache"
+    "$HOME/Library/Application Support/Arc/User Data/ShaderCache"
+  )
+
+  for cache in "${arc_paths[@]}"; do
+    [[ -d "$cache" ]] || continue
+    local size
+    size=$(utils::get_size_bytes "$cache")
+    browsers::_add_scanned "$size"
+    safe_rm "$cache" "Arc Browser Cache"
+  done
 }
 
 browsers::_zen() {

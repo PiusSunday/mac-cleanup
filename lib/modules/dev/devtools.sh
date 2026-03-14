@@ -325,17 +325,24 @@ devtools::_python_cache() {
 devtools::_gradle_cache() {
   _DEV_GRADLE_TOTAL=0
   local path="$HOME/.gradle/caches"
-  if [[ ! -d "$path" ]]; then
-    log::info "Gradle cache: not found — skipping."
-    return 0
+  [[ -d "$path" ]] || { log::info "Gradle cache: not found — skipping."; return 0; }
+
+  local total=0
+  # Age-gate: only delete version cache dirs older than 30 days
+  while IFS= read -r cache_dir; do
+    [[ -n "$cache_dir" ]] || continue
+    local size
+    size=$(utils::get_size_bytes "$cache_dir")
+    (( size > 0 )) || continue
+    log::info "  Gradle cache (stale): $(basename "$cache_dir") — $(utils::format_bytes "$size")"
+    safe_rm "$cache_dir" "Gradle cache: $(basename "$cache_dir")"
+    total=$(( total + size ))
+  done < <(find "$path" -mindepth 1 -maxdepth 1 -type d -mtime +30 2>/dev/null || true)
+
+  _DEV_GRADLE_TOTAL=$total
+  if (( total == 0 )); then
+    log::info "Gradle cache: no stale entries (all < 30 days old)."
   fi
-
-  local size_bytes
-  size_bytes=$(utils::get_size_bytes "$path")
-  _DEV_GRADLE_TOTAL=$size_bytes
-
-  log::info "Gradle cache: $(utils::format_bytes "$size_bytes")"
-  safe_rm "$path" "Gradle cache"
 }
 
 # ── e) Ruby Bundler + Gem cache ───────────────────────────────────────────────
@@ -560,14 +567,31 @@ devtools::_python_modern() {
 devtools::_bun_tnpm() {
   _DEV_BUNTNPM_TOTAL=0
   local total=0
-  local -a paths=(
-    "$HOME/.bun/install/cache"
+
+  # Bun
+  if command -v bun &>/dev/null; then
+    local -a bun_paths=(
+      "$HOME/Library/Caches/bun"
+      "$HOME/.bun/install/cache"
+    )
+    for p in "${bun_paths[@]}"; do
+      [[ -d "$p" ]] || continue
+      local size
+      size=$(utils::get_size_bytes "$p")
+      (( size > 0 )) || continue
+      total=$(( total + size ))
+      safe_rm "$p" "Bun cache: $(basename "$p")"
+    done
+  fi
+
+  # tnpm
+  local -a tnpm_paths=(
     "$HOME/.tnpm/_cacache"
     "$HOME/.tnpm/_logs"
   )
 
   local p
-  for p in "${paths[@]}"; do
+  for p in "${tnpm_paths[@]}"; do
     [[ -d "$p" ]] || continue
     local size
     size=$(utils::get_size_bytes "$p")

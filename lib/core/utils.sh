@@ -193,6 +193,7 @@ safe_rm() {
   local use_force=false
   local use_sudo=false
   local use_internal=false
+  local use_silent=false
 
   if [[ "$options" == *"force"* ]]; then
     use_force=true
@@ -202,6 +203,9 @@ safe_rm() {
   fi
   if [[ "$options" == *"internal"* ]]; then
     use_internal=true
+  fi
+  if [[ "$options" == *"silent"* ]]; then
+    use_silent=true
   fi
 
   if [[ -z "$path" ]]; then
@@ -233,27 +237,6 @@ safe_rm() {
     fi
   fi
 
-  if ! _safe_rm_check_system_path "$resolved"; then
-    log::warn "safe_rm: protected system path rejected: $resolved"
-    return 1
-  fi
-
-  if [[ "$use_force" != "true" ]] && utils::is_whitelisted "$resolved"; then
-    log::verbose "safe_rm: whitelisted path skipped: $resolved"
-    _oplog "SKIPPED" "$resolved" "whitelist"
-    return 0
-  fi
-
-  if [[ "$use_sudo" != "true" ]]; then
-    local parent
-    parent="$(dirname "$resolved")"
-    if [[ ! -w "$parent" ]]; then
-      log::verbose "safe_rm: non-writable path skipped: $resolved"
-      _oplog "SKIPPED" "$resolved" "permission"
-      return 1
-    fi
-  fi
-
   if [[ ! -e "$resolved" ]]; then
     return 0
   fi
@@ -263,9 +246,41 @@ safe_rm() {
   local bytes_fmt
   bytes_fmt=$(utils::format_bytes "$bytes")
 
+  if ! _safe_rm_check_system_path "$resolved"; then
+    log::warn "safe_rm: protected system path rejected: $resolved"
+    if [[ "$DRY_RUN" == "true" && "$use_internal" != "true" ]]; then
+       log::info "[DRY-RUN] ${bytes_fmt} ${label} (Skipped: System Protected)"
+    fi
+    return 1
+  fi
+
+  if [[ "$use_force" != "true" ]] && utils::is_whitelisted "$resolved"; then
+    log::verbose "safe_rm: whitelisted path skipped: $resolved"
+    _oplog "SKIPPED" "$resolved" "whitelist"
+    if [[ "$DRY_RUN" == "true" && "$use_internal" != "true" ]]; then
+       log::info "[DRY-RUN] ${bytes_fmt} ${label} (Skipped: Whitelisted)"
+    fi
+    return 0
+  fi
+
+  if [[ "$use_sudo" != "true" ]]; then
+    local parent
+    parent="$(dirname "$resolved")"
+    if [[ ! -w "$parent" ]]; then
+      log::verbose "safe_rm: non-writable path skipped: $resolved"
+      _oplog "SKIPPED" "$resolved" "permission"
+      if [[ "$DRY_RUN" == "true" && "$use_internal" != "true" ]]; then
+         log::info "[DRY-RUN] ${bytes_fmt} ${label} (Skipped: Permission Denied)"
+      fi
+      return 1
+    fi
+  fi
+
   if [[ "$DRY_RUN" == "true" && "$use_internal" != "true" ]]; then
     TOTAL_DRYRUN_BYTES=$(( TOTAL_DRYRUN_BYTES + bytes ))
-    log::info "[DRY-RUN] ${bytes_fmt} ${label}"
+    if [[ "$use_silent" != "true" ]] || [[ "$VERBOSE" == "true" ]]; then
+      log::info "[DRY-RUN] ${bytes_fmt} ${label}"
+    fi
     _oplog "DRYRUN" "$resolved" "$bytes_fmt"
     return 0
   fi
@@ -274,12 +289,18 @@ safe_rm() {
     sudo rm -rf -- "$resolved" 2>/dev/null || {
       log::verbose "safe_rm: deletion failed: $resolved"
       _oplog "SKIPPED" "$resolved" "delete-failed"
+      if [[ "$DRY_RUN" != "true" ]]; then
+        log::warn "Skipped: ${label} (deletion failed/in use)"
+      fi
       return 1
     }
   else
     rm -rf -- "$resolved" 2>/dev/null || {
       log::verbose "safe_rm: deletion failed: $resolved"
       _oplog "SKIPPED" "$resolved" "delete-failed"
+      if [[ "$DRY_RUN" != "true" ]]; then
+        log::warn "Skipped: ${label} (deletion failed/in use)"
+      fi
       return 1
     }
   fi
@@ -289,7 +310,9 @@ safe_rm() {
   fi
 
   TOTAL_FREED=$(( TOTAL_FREED + bytes ))
-  log::success "${label} ($(utils::format_bytes "$bytes"))"
+  if [[ "$use_silent" != "true" ]] || [[ "$VERBOSE" == "true" ]]; then
+    log::success "${label} ($(utils::format_bytes "$bytes"))"
+  fi
   _oplog "REMOVED" "$resolved" "$bytes_fmt"
   return 0
 }
@@ -520,6 +543,19 @@ utils::register_module() {
       fi
     else
       projected="$freed"
+    fi
+  fi
+
+  # Support mode-aware status conversion
+  if [[ "$status" =~ ^[0-9]+$ ]]; then
+    if (( status > 0 )); then
+      if [[ "$DRY_RUN" == "true" ]]; then
+        status="clean"
+      else
+        status="done"
+      fi
+    else
+      status="clean"
     fi
   fi
 

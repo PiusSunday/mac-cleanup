@@ -233,7 +233,7 @@ print_report() {
   fi
 
   local bar
-  bar=$(printf '━%.0s' $(seq 1 53))
+  bar=$(printf '━%.0s' $(seq 1 76))
 
   # ── Header ──
   printf '\n%s%s%s%s\n' "${BOLD}" "${BLUE}" "$bar" "${RESET}"
@@ -244,8 +244,8 @@ print_report() {
 
   # ── Column headers ──
   local separator
-  separator=$(printf '─%.0s' $(seq 1 77))
-  printf '  %s%-18s %-15s %11s %13s   %s%s\n' \
+  separator=$(printf '─%.0s' $(seq 1 76))
+  printf '  %s%-18s %-22s %10s %13s   %s%s\n' \
     "${BOLD}" "Category" "Module" "Found" "Reclaimable" "Status" "${RESET}"
   printf '  %s\n' "$separator"
 
@@ -294,9 +294,12 @@ print_report() {
         review)
           status_fmt="${CYAN}Needs review${RESET}"
           ;;
+        done)
+          status_fmt="${GREEN}✔ Done${RESET}"
+          ;;
       esac
 
-      printf '  %-18s %-15s %11s %13s   %s\n' \
+      printf '  %-18s %-22s %10s %13s   %s\n' \
         "$cat_display" "$name" "$found_fmt" "$reclaimable_fmt" "$status_fmt"
     done
   fi
@@ -308,8 +311,8 @@ print_report() {
   total_found_fmt=$(utils::format_bytes "$total_scanned")
   total_reclaimable_fmt=$(utils::format_bytes "$total_projected")
 
-  printf '  %s%-18s %-15s %11s %13s%s\n' \
-    "${BOLD}" "TOTALS" "" "$total_found_fmt" "$total_reclaimable_fmt" "${RESET}"
+  printf '  %s%-18s %-22s %10s %13s   %s%s\n' \
+    "${BOLD}" "TOTALS" "" "$total_found_fmt" "$total_reclaimable_fmt" "" "${RESET}"
 
   # ── Footer ──
   printf '\n'
@@ -329,8 +332,13 @@ print_report() {
   printf '  Log saved:   %s\n' "$LOG_FILE"
   printf '\n'
   printf '  %sStatus legend:%s\n' "${BOLD}" "${RESET}"
-  printf '  - Needs review: found items are excluded from projected reclaimable bytes.\n'
-  printf '  - Clean: module will be cleaned automatically in a real run.\n'
+  if [[ "$DRY_RUN" == "true" ]]; then
+    printf '  - Clean: module has items that will be deleted in a live run.\n'
+  else
+    printf '  - ✔ Done: module was cleaned successfully.\n'
+    printf '  - Clean: module was already clean (nothing found).\n'
+  fi
+  printf '  - Needs review: found items require manual action — not auto-deleted.\n'
   printf '  - Skipped: prerequisite unavailable.\n'
   printf '%s%s%s%s\n\n' "${BOLD}" "${BLUE}" "$bar" "${RESET}"
 
@@ -349,10 +357,6 @@ main() {
   utils::check_macos
   utils::load_whitelist
 
-  if [[ "$DRY_RUN" != "true" ]]; then
-    preflight::run
-  fi
-
   # Capture start time for duration tracking
   local start_time
   start_time=$(date +%s)
@@ -364,6 +368,7 @@ main() {
   if [[ "$DRY_RUN" != "true" ]]; then
     printf '\n  %s%s  ⚠  LIVE MODE — files will be permanently deleted%s\n\n' \
       "${BOLD}" "${RED}" "${RESET}"
+    preflight::run
   fi
 
   # Snapshot free space before
