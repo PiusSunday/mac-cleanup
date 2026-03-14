@@ -20,7 +20,7 @@ jobs:
       - name: Install test dependencies
         run: brew install shellcheck bats-core
       - name: Run ShellCheck
-        run: shellcheck lib/*.sh bin/mac-cleanup
+        run: shellcheck $(find lib -type f -name "*.sh") bin/mac-cleanup
       - name: Run Bats Tests
         run: bats tests/
       - name: Run Smoke Tests

@@ -34,6 +34,7 @@ TRASH="🗑"
 # ── v0.4.0 safety primitives ────────────────────────────────────────────────
 WHITELIST_FILE="${WHITELIST_FILE:-$HOME/.config/mac-cleanup/whitelist}"
 OPLOG_FILE="${OPLOG_FILE:-$HOME/.mac-cleanup/operations.log}"
+LOG_FILE="${LOG_FILE:-$HOME/.mac-cleanup/cleanup.log}"
 
 declare -a WHITELIST_PATTERNS=()
 
