@@ -165,19 +165,19 @@ mac-cleanup --show-log
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Mode: DRY-RUN  |  Duration: 3s
 
-  Category           Module                Found   Reclaimable   Status
+  Category           Module                      Found   Reclaimable   Status
   ─────────────────────────────────────────────────────────────────────────────
-  System             System               1.2 GB        1.2 GB   Clean
-                     Deep System               -             -   Clean
-                     Orphans                   -             -   Clean
-  Developer Tools    Xcode                42.3 GB       42.3 GB   Clean
-                     Docker                    -             -   Skipped
-                     Dev Artifacts         73.6 MB       73.6 MB   Clean
-  Caches & Logs      Caches              345.5 MB      345.5 MB   Clean
-                     Homebrew             53.2 MB       53.2 MB   Clean
-  Storage Management Snapshots                 -             -   Clean
+  System             System                     1.2 GB        1.2 GB   Clean
+                     Deep System                     -             -   Clean
+                     Orphans                         -             -   Clean
+  Developer Tools    Xcode                     42.3 GB       42.3 GB   Clean
+                     Docker                          -             -   Skipped
+                     Dev Artifacts             73.6 MB       73.6 MB   Clean
+  Caches & Logs      Caches                   345.5 MB      345.5 MB   Clean
+                     Homebrew                  53.2 MB       53.2 MB   Clean
+  Storage Management Snapshots                       -             -   Clean
   ─────────────────────────────────────────────────────────────────────────────
-  TOTALS                                   43.8 GB       43.8 GB
+  TOTALS                                       43.8 GB       43.8 GB
 
   Free space:  331 GB → 374.8 GB (projected)
   Log saved:   ~/.mac-cleanup/cleanup.log
@@ -185,6 +185,7 @@ mac-cleanup --show-log
   Status legend:
   - Needs review: found items are excluded from projected reclaimable bytes.
   - Clean: module will be cleaned automatically in a real run.
+  - ✔ Done: module was cleaned successfully.
   - Skipped: prerequisite unavailable.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
