@@ -391,7 +391,7 @@ print_report() {
     printf '  - ✔ Done: module was cleaned successfully.\n'
     printf '  - Clean: module was already clean (nothing found).\n'
   fi
-  printf '  - Needs review: found items require manual action — not auto-deleted.\n'
+  printf '  - Needs review: requires manual action or specific flags (e.g. --clean-orphans).\n'
   printf '  - Skipped: prerequisite unavailable.\n'
   printf '%s%s%s%s\n\n' "${BOLD}" "${BLUE}" "$bar" "${RESET}"
 

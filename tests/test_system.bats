@@ -123,8 +123,9 @@ setup() {
 @test "system::_system_data_clues: prints header" {
   local old_home="$HOME"
   export HOME="${BATS_TEST_TMPDIR}/fake_home_clues"
-  mkdir -p "$HOME"
-
+  mkdir -p "$HOME/Library/Developer/CoreSimulator"
+  
+  utils::get_size_bytes() { echo "2048"; }
   run system::_system_data_clues
 
   export HOME="$old_home"

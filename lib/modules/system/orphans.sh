@@ -31,7 +31,7 @@ orphans::clean() {
   if [[ "$CLEAN_ORPHANS" == "true" ]]; then
     orphans::_delete_confirmed_candidates
   else
-    log::info "Orphan detection is report-only by default. Use --clean-orphans to delete candidates."
+    log::warn "Orphans are report-only by default. Run with --clean-orphans to delete them."
   fi
 
   local freed=$(( TOTAL_FREED - freed_before ))
