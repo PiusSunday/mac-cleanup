@@ -6,8 +6,8 @@ caches::clean() {
   log::section "Caches"
 
   local module_scanned=0
-  local disk_before
-  disk_before=$(utils::get_free_bytes)
+  local freed_before=$TOTAL_FREED
+  local dryrun_before=$TOTAL_DRYRUN_BYTES
 
   caches::_user_caches
   module_scanned=$(( module_scanned + _CACHES_USER_TOTAL ))
@@ -45,10 +45,14 @@ caches::clean() {
   caches::_jetbrains
   module_scanned=$(( module_scanned + _CACHES_JETBRAINS_TOTAL ))
 
-  local disk_after
-  disk_after=$(utils::get_free_bytes)
-  local freed=$(( disk_after - disk_before ))
-  if (( freed < 0 )); then freed=0; fi
+  local freed=$(( TOTAL_FREED - freed_before ))
+  local dryrun_freed=$(( TOTAL_DRYRUN_BYTES - dryrun_before ))
+  local projected=0
+  if [[ "$DRY_RUN" == "true" ]]; then
+    projected="$dryrun_freed"
+  else
+    projected="$freed"
+  fi
 
   module_summary "Caches" "$module_scanned"
 
@@ -56,7 +60,7 @@ caches::clean() {
   if (( module_scanned > 0 )); then
     status="$module_scanned"
   fi
-  utils::register_module "Caches" "Caches & Logs" "$module_scanned" "$freed" "$status"
+  utils::register_module "Caches" "Caches & Logs" "$module_scanned" "$freed" "$status" "$projected"
 }
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -147,20 +151,29 @@ caches::_app_support_caches() {
   log::info "Scanning Application Support caches..."
   local total=0
   while IFS= read -r cache_dir; do
+    [[ -n "$cache_dir" ]] || continue
+
     local app_name
     app_name=$(basename "$(dirname "$cache_dir")")
+
+    if [[ "$app_name" == com.apple.* ]]; then
+      log::verbose "Skipping system app support: ${app_name}"
+      continue
+    fi
+
     if caches::_is_app_running "$app_name"; then
       log::verbose "Skipping active app cache: ${app_name}"
       continue
     fi
+
     local size_bytes
     size_bytes=$(utils::get_size_bytes "$cache_dir")
     total=$(( total + size_bytes ))
     local size_fmt
     size_fmt=$(utils::format_bytes "$size_bytes")
     log::info "  ${ARROW} ${size_fmt}  ${cache_dir}"
-    safe_rm "$cache_dir" "App Support Cache: ${app_name}"
-  done < <(find "$base" -mindepth 2 -maxdepth 2 -type d -name "Cache" 2>/dev/null || true)
+    safe_rm "$cache_dir" "App Support: ${app_name}/$(basename "$cache_dir")"
+  done < <(find "$base" -mindepth 2 -maxdepth 2 -type d \( -iname "cache" -o -iname "logs" -o -iname "log" -o -iname "tmp" -o -iname "temp" \) 2>/dev/null || true)
   _CACHES_APPSUPPORT_TOTAL=$total
 }
 

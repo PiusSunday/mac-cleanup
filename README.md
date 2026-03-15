@@ -13,14 +13,14 @@
 
 ## Why mac-cleanup?
 
-- **Xcode alone** can silently accumulate 50–100 GB in DerivedData, Archives, and DeviceSupport folders
-- **Docker Desktop** builds up image layers, stopped containers, and build cache that are never automatically cleaned
-- **System Data** in macOS Storage settings balloons with Time Machine local snapshots, crash reports, and old installer payloads
-- **Browser Frameworks** (Chrome, Edge) leave Gigabytes of abandoned framework versions hiding in your Application Support
-- **Homebrew** keeps years of cached downloads even after packages are updated or removed
-- **Developer tools** (npm, pip, Go, Rust, Gradle) scatter caches and build artifacts across your home directory
+Macs aren't designed to naturally tidy up after developers. Whether you're building apps, managing containers, or experimenting with new environments, your local storage silently shoulders the burden of massive hidden dependencies.
 
-mac-cleanup gives you a single, safe command to reclaim all of it, beautifully organized into a Domain-Driven architecture.
+- **Xcode Environments**: DerivedData, old project Archives, and iOS DeviceSupport files can quietly swell to consume over 50-100 GB in forgotten storage.
+- **Container Ecosystems**: Docker Desktop frequently orphans dangling images, ghost containers, and multi-gigabyte build caching layers over time without auto-pruning.
+- **Toolchain Leftovers**: Every runtime from Node (`node_modules`) and Python (`__pycache__`) to Gradle and Rust (`target/`) leaves behind hundreds of stale cache fragments scattered across your home directory.
+- **Deceptive System Data**: The ambiguous "System Data" block in macOS Storage settings often hides gigabytes of abandoned Time Machine local snapshots, browser frameworks lacking clean deletion patterns, and old `.pkg` payloads.
+
+**mac-cleanup** stops you from running dozens of frantic `rm -rf` commands and obscure terminal invocations. It replaces chaos with a single, safe, open-source command engineered meticulously through a Domain-Driven architecture to isolate exactly what is stale, age-gated, and safe to delete—empowering you to seamlessly recover your Mac's performance.
 
 ---
 

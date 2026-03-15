@@ -13,8 +13,8 @@ system_deep::clean() {
 
   _SYSTEM_DEEP_TOTAL=0
   _SYSTEM_DEEP_CAN_USE_SUDO=false
-  local disk_before
-  disk_before=$(utils::get_free_bytes)
+  local freed_before=$TOTAL_FREED
+  local dryrun_before=$TOTAL_DRYRUN_BYTES
 
   if sudo -n true 2>/dev/null; then
     _SYSTEM_DEEP_CAN_USE_SUDO=true
@@ -39,11 +39,13 @@ system_deep::clean() {
   system_deep::_safari_content_cache
   system_deep::_browser_code_sign_caches
 
-  local disk_after
-  disk_after=$(utils::get_free_bytes)
-  local freed=$(( disk_after - disk_before ))
-  if (( freed < 0 )); then
-    freed=0
+  local freed=$(( TOTAL_FREED - freed_before ))
+  local dryrun_freed=$(( TOTAL_DRYRUN_BYTES - dryrun_before ))
+  local projected=0
+  if [[ "$DRY_RUN" == "true" ]]; then
+    projected="$dryrun_freed"
+  else
+    projected="$freed"
   fi
 
   module_summary "Deep System" "$_SYSTEM_DEEP_TOTAL"
@@ -53,7 +55,7 @@ system_deep::clean() {
     status="$_SYSTEM_DEEP_TOTAL"
   fi
 
-  utils::register_module "Deep System" "System" "$_SYSTEM_DEEP_TOTAL" "$freed" "$status"
+  utils::register_module "Deep System" "System" "$_SYSTEM_DEEP_TOTAL" "$freed" "$status" "$projected"
 }
 
 system_deep::_add_scanned() {

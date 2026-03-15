@@ -143,33 +143,43 @@ parse_flags() {
     case "$1" in
       --system|-S)
         TARGET_SYSTEM=true
+        target_specified=true
         ;;
       --xcode|-x)
         TARGET_XCODE=true
+        target_specified=true
         ;;
       --system-deep|-z)
         TARGET_SYSTEM_DEEP=true
+        target_specified=true
         ;;
       --docker|-d)
         TARGET_DOCKER=true
+        target_specified=true
         ;;
       --devtools|-D)
         TARGET_DEVTOOLS=true
+        target_specified=true
         ;;
       --snapshots|-s)
         TARGET_SNAPSHOTS=true
+        target_specified=true
         ;;
       --caches|-c)
         TARGET_CACHES=true
+        target_specified=true
         ;;
       --mail|-m)
         TARGET_MAIL=true
+        target_specified=true
         ;;
       --brew|-b)
         TARGET_BREW=true
+        target_specified=true
         ;;
       --optimize|-O)
         TARGET_OPTIMIZE=true
+        target_specified=true
         ;;
       --all|-a)
         TARGET_SYSTEM=true
@@ -181,6 +191,7 @@ parse_flags() {
         TARGET_MAIL=true
         TARGET_SYSTEM_DEEP=true
         TARGET_BREW=true
+        target_specified=true
         ;;
       --clean-orphans)
         CLEAN_ORPHANS=true
@@ -335,6 +346,9 @@ print_report() {
         done)
           status_fmt="${GREEN}✔ Done${RESET}"
           ;;
+        Pending|pending)
+          status_fmt="${YELLOW}Pending${RESET}"
+          ;;
       esac
 
       printf '  %-18s %-22s %10s %13s   %s\n' \
@@ -371,7 +385,8 @@ print_report() {
   printf '\n'
   printf '  %sStatus legend:%s\n' "${BOLD}" "${RESET}"
   if [[ "$DRY_RUN" == "true" ]]; then
-    printf '  - Clean: module has items that will be deleted in a live run.\n'
+    printf '  - Pending: module has items that will be deleted in a live run.\n'
+    printf '  - Clean: module was already clean (nothing found).\n'
   else
     printf '  - ✔ Done: module was cleaned successfully.\n'
     printf '  - Clean: module was already clean (nothing found).\n'
@@ -418,46 +433,56 @@ main() {
   local disk_before
   disk_before=$(utils::get_free_bytes)
 
+  run_module() {
+    local module_name="$1"
+    local module_fn="$2"
+    shift 2
+
+    if ! "$module_fn" "$@"; then
+      log::warn "Module '${module_name}' encountered an error — continuing."
+    fi
+  }
+
   # ── System (always runs first) ──
   log::category "System"
-  system::clean
-  [[ "$TARGET_SYSTEM_DEEP" == "true" ]] && system_deep::clean
-  orphans::clean
+  run_module "System" system::clean
+  [[ "$TARGET_SYSTEM_DEEP" == "true" ]] && run_module "System Deep" system_deep::clean
+  run_module "Orphans" orphans::clean
 
   # ── Developer Tools ──
   if [[ "$TARGET_XCODE" == "true" ]] || [[ "$TARGET_DOCKER" == "true" ]] || [[ "$TARGET_DEVTOOLS" == "true" ]]; then
     log::category "Developer Tools"
-    [[ "$TARGET_XCODE" == "true" ]]    && xcode::clean
-    [[ "$TARGET_DOCKER" == "true" ]]   && docker::clean
-    [[ "$TARGET_DEVTOOLS" == "true" ]] && devtools::clean
+    [[ "$TARGET_XCODE" == "true" ]]    && run_module "Xcode" xcode::clean
+    [[ "$TARGET_DOCKER" == "true" ]]   && run_module "Docker" docker::clean
+    [[ "$TARGET_DEVTOOLS" == "true" ]] && run_module "Developer Tools" devtools::clean
   fi
 
   # ── Caches & Logs ──
   if [[ "$TARGET_CACHES" == "true" ]] || [[ "$TARGET_BREW" == "true" ]] || [[ "$TARGET_MAIL" == "true" ]]; then
     log::category "Caches & Logs"
     if [[ "$TARGET_CACHES" == "true" ]]; then
-      caches::clean
-      browsers::clean
-      apps::clean
+      run_module "Caches" caches::clean
+      run_module "Browsers" browsers::clean
+      run_module "Apps" apps::clean
     fi
-    [[ "$TARGET_MAIL" == "true" ]] && mail::clean
-    [[ "$TARGET_BREW" == "true" ]]   && brew::clean
+    [[ "$TARGET_MAIL" == "true" ]] && run_module "Mail" mail::clean
+    [[ "$TARGET_BREW" == "true" ]]   && run_module "Homebrew" brew::clean
   fi
 
   if [[ "$DEVOPS_RESET_MODE" == "true" ]]; then
     log::category "Developer Tools"
-    devops_reset::run
+    run_module "DevOps Reset" devops_reset::run
   fi
 
   # ── Storage Management ──
   if [[ "$TARGET_SNAPSHOTS" == "true" ]]; then
     log::category "Storage Management"
-    snapshots::clean
+    run_module "Snapshots" snapshots::clean
   fi
 
   # ── Optimization ──
   if [[ "${TARGET_OPTIMIZE:-false}" == "true" ]]; then
-    optimize::run
+    run_module "Optimize" optimize::run
   fi
 
   # Snapshot free space after

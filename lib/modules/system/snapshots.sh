@@ -15,8 +15,8 @@ snapshots::clean() {
   local snapshots
   snapshots=$(tmutil listlocalsnapshots / 2>/dev/null)
 
-  local disk_before
-  disk_before=$(utils::get_free_bytes)
+  local freed_before=$TOTAL_FREED
+  local dryrun_before=$TOTAL_DRYRUN_BYTES
 
   if [[ -z "$snapshots" ]]; then
     log::info "No local snapshots found."
@@ -30,10 +30,14 @@ snapshots::clean() {
   dry_run_or_exec tmutil deletelocalsnapshots /
   snapshots::_in_progress
 
-  local disk_after
-  disk_after=$(utils::get_free_bytes)
-  local freed=$(( disk_after - disk_before ))
-  if (( freed < 0 )); then freed=0; fi
+  local freed=$(( TOTAL_FREED - freed_before ))
+  local dryrun_freed=$(( TOTAL_DRYRUN_BYTES - dryrun_before ))
+  local projected=0
+  if [[ "$DRY_RUN" == "true" ]]; then
+    projected="$dryrun_freed"
+  else
+    projected="$freed"
+  fi
 
   module_summary "Snapshots" "$freed"
 
@@ -44,7 +48,7 @@ snapshots::clean() {
     status="clean"
   fi
 
-  utils::register_module "Snapshots" "Storage Management" "0" "$freed" "$status"
+  utils::register_module "Snapshots" "Storage Management" "0" "$freed" "$status" "$projected"
 }
 
 # List local snapshots with timestamps

@@ -9,8 +9,8 @@ system::clean() {
 
   local module_scanned=0
 
-  local disk_before
-  disk_before=$(utils::get_free_bytes)
+  local freed_before=$TOTAL_FREED
+  local dryrun_before=$TOTAL_DRYRUN_BYTES
 
   system::_crash_reports
   module_scanned=$(( module_scanned + _SYS_CRASH_TOTAL ))
@@ -29,21 +29,19 @@ system::clean() {
 
   system::_system_data_clues
 
-  local disk_after
-  disk_after=$(utils::get_free_bytes)
-  local freed=$(( disk_after - disk_before ))
-  if (( freed < 0 )); then freed=0; fi
+  local freed=$(( TOTAL_FREED - freed_before ))
+  local dryrun_freed=$(( TOTAL_DRYRUN_BYTES - dryrun_before ))
+  local projected=0
+  if [[ "$DRY_RUN" == "true" ]]; then
+    projected="$dryrun_freed"
+  else
+    projected="$freed"
+  fi
 
   module_summary "System" "$module_scanned"
 
   # Determine status
   local status="clean"
-  local projected=0
-  if [[ "$DRY_RUN" == "true" ]]; then
-    projected="$module_scanned"
-  else
-    projected="$freed"
-  fi
 
   # System Data clues are informational only. If the module also has real
   # cleanup candidates, it still behaves as a normal cleanable module.
@@ -185,22 +183,25 @@ system::_trash() {
   fi
 
   if [[ "$DRY_RUN" == "true" ]]; then
+    TOTAL_DRYRUN_BYTES=$(( TOTAL_DRYRUN_BYTES + trash_size ))
     log::info "[DRY-RUN] Would empty Trash (${trash_count} items)"
     return
   fi
 
   # Capture disk state before emptying
-  local disk_before_trash
-  disk_before_trash=$(utils::get_free_bytes)
+  local freed_before_trash=$TOTAL_FREED
+  local dryrun_before_trash=$TOTAL_DRYRUN_BYTES
 
   # Empty via Finder — respects locked files and macOS conventions
   if _osascript_timed 10 -e 'tell application "Finder" to empty trash'; then
     # Allow APFS to update free space reporting
     sleep 1
-    local disk_after_trash
-    disk_after_trash=$(utils::get_free_bytes)
-    local disk_delta=$(( disk_after_trash - disk_before_trash ))
-    if (( disk_delta < 0 )); then disk_delta=0; fi
+    # Since we can't capture bytes via safe_rm for the Finder AppleScript,
+    # we must default to adding the computed size manually.
+    if [[ "$DRY_RUN" != "true" ]]; then
+      TOTAL_FREED=$(( TOTAL_FREED + trash_size ))
+    fi
+    local disk_delta=$trash_size
 
     # Use whichever is larger: Finder-reported size or actual disk delta
     local actual_freed=$(( trash_size > disk_delta ? trash_size : disk_delta ))
@@ -213,14 +214,15 @@ system::_trash() {
     fi
   else
     # Fallback: direct delete if Finder call fails or times out
-    local disk_before_fallback
-    disk_before_fallback=$(utils::get_free_bytes)
+    local freed_before_fallback=$TOTAL_FREED
+    local dryrun_before_fallback=$TOTAL_DRYRUN_BYTES
     safe_rm_contents "${HOME}/.Trash" "Trash"
     sleep 1
-    local disk_after_fallback
-    disk_after_fallback=$(utils::get_free_bytes)
-    local fallback_freed=$(( disk_after_fallback - disk_before_fallback ))
-    if (( fallback_freed < 0 )); then fallback_freed=0; fi
+    local fallback_freed=$(( TOTAL_FREED - freed_before_fallback ))
+    if [[ "$DRY_RUN" == "true" ]]; then
+      fallback_freed=$(( TOTAL_DRYRUN_BYTES - dryrun_before_fallback ))
+    fi
+    
     _SYS_TRASH_TOTAL=$fallback_freed
 
     if (( fallback_freed > 0 )); then

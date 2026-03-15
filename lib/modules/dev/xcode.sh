@@ -10,8 +10,8 @@ xcode::clean() {
   log::section "Xcode"
 
   MODULE_XCODE_SCANNED=0
-  local disk_before
-  disk_before=$(utils::get_free_bytes)
+  local freed_before=$TOTAL_FREED
+  local dryrun_before=$TOTAL_DRYRUN_BYTES
 
   xcode::_derived_data
   xcode::_archives
@@ -21,10 +21,14 @@ xcode::clean() {
   xcode::_documentation_cache
   xcode::_device_logs
 
-  local disk_after
-  disk_after=$(utils::get_free_bytes)
-  local freed=$(( disk_after - disk_before ))
-  if (( freed < 0 )); then freed=0; fi
+  local freed=$(( TOTAL_FREED - freed_before ))
+  local dryrun_freed=$(( TOTAL_DRYRUN_BYTES - dryrun_before ))
+  local projected=0
+  if [[ "$DRY_RUN" == "true" ]]; then
+    projected="$dryrun_freed"
+  else
+    projected="$freed"
+  fi
 
   module_summary "Xcode" "$MODULE_XCODE_SCANNED"
 
@@ -32,7 +36,7 @@ xcode::clean() {
   if (( MODULE_XCODE_SCANNED > 0 )); then
     status="$MODULE_XCODE_SCANNED"
   fi
-  utils::register_module "Xcode" "Developer Tools" "$MODULE_XCODE_SCANNED" "$freed" "$status"
+  utils::register_module "Xcode" "Developer Tools" "$MODULE_XCODE_SCANNED" "$freed" "$status" "$projected"
 }
 
 # ── Internal helpers ──────────────────────────────────────────────────────────

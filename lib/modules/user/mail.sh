@@ -9,17 +9,19 @@ mail::clean() {
   log::section "Mail & Communications"
 
   _MAIL_TOTAL=0
-  local disk_before
-  disk_before=$(utils::get_free_bytes)
+  local freed_before=$TOTAL_FREED
+  local dryrun_before=$TOTAL_DRYRUN_BYTES
 
   mail::_downloads
   mail::_recent_items
 
-  local disk_after
-  disk_after=$(utils::get_free_bytes)
-  local freed=$(( disk_after - disk_before ))
-  if (( freed < 0 )); then
-    freed=0
+  local freed=$(( TOTAL_FREED - freed_before ))
+  local dryrun_freed=$(( TOTAL_DRYRUN_BYTES - dryrun_before ))
+  local projected=0
+  if [[ "$DRY_RUN" == "true" ]]; then
+    projected="$dryrun_freed"
+  else
+    projected="$freed"
   fi
 
   module_summary "Mail" "$_MAIL_TOTAL"
@@ -29,7 +31,7 @@ mail::clean() {
     status="$_MAIL_TOTAL"
   fi
 
-  utils::register_module "Mail" "Caches & Logs" "$_MAIL_TOTAL" "$freed" "$status"
+  utils::register_module "Mail" "Caches & Logs" "$_MAIL_TOTAL" "$freed" "$status" "$projected"
 }
 
 mail::_downloads() {

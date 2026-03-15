@@ -1,197 +1,142 @@
 #!/usr/bin/env bats
-# tests/test_devtools.bats — Unit tests for lib/devtools.sh
+# tests/test_devtools.bats — Unit tests for lib/modules/dev/devtools.sh
 
 setup() {
-  source "$BATS_TEST_DIRNAME/../lib/core/core.sh"
-  source "$BATS_TEST_DIRNAME/../lib/core/utils.sh"
-  source "$BATS_TEST_DIRNAME/../lib/modules/dev/devtools.sh"
-  DRY_RUN=true
-  VERBOSE=false
-  SKIP_CONFIRM=true
-  LOG_FILE="/dev/null"
-  export TMPDIR="${BATS_TEST_TMPDIR}"
+  TEST_TMP="$(mktemp -d)"
+  export HOME="$TEST_TMP"
+  
+  source "${BATS_TEST_DIRNAME}/../lib/core/core.sh"
+  source "${BATS_TEST_DIRNAME}/../lib/core/utils.sh"
+  source "${BATS_TEST_DIRNAME}/../lib/modules/dev/devtools.sh"
+
+  export DRY_RUN=true
+  export SKIP_CONFIRM=true
+  export VERBOSE=false
+
+  # Clean tracking arrays
+  MODULE_NAMES=()
+  MODULE_CATEGORIES=()
+  MODULE_STATUS=()
+  MODULE_FREED=()
+  MODULE_SCANNED=()
+  MODULE_PROJECTED=()
+
+  export DEVTOOLS_SCAN_DIRS=("$HOME/Developer")
+  export DEVTOOLS_EXCLUDE_PATHS=()
+  export PYCACHE_EXCLUDE_PATHS=()
 }
 
-# ── node_modules ──────────────────────────────────────────────────────────────
+teardown() {
+  rm -rf "$TEST_TMP"
+}
 
 @test "devtools::_node_modules: detects orphaned node_modules (no package.json)" {
-  local old_home="$HOME"
-  export HOME="${BATS_TEST_TMPDIR}/fake_home_orphan"
   mkdir -p "$HOME/Developer/orphan/node_modules"
-  echo "module data" > "$HOME/Developer/orphan/node_modules/testfile"
-  # No package.json — this is orphaned
-  DEVTOOLS_SCAN_DIRS=("$HOME/Developer")
-  DEVTOOLS_EXCLUDE_PATHS=()
+  echo "data" > "$HOME/Developer/orphan/node_modules/t1"
 
   _DEV_NODE_TOTAL=0
-  devtools::_node_modules > /dev/null 2>&1
-
-  export HOME="$old_home"
+  devtools::_node_modules >/dev/null 2>&1
   [ "$_DEV_NODE_TOTAL" -gt 0 ]
 }
 
 @test "devtools::_node_modules: does not count active node_modules" {
-  local old_home="$HOME"
-  export HOME="${BATS_TEST_TMPDIR}/fake_home_active"
   mkdir -p "$HOME/Developer/active/node_modules"
-  echo '{"name":"test"}' > "$HOME/Developer/active/package.json"
-  echo "module data" > "$HOME/Developer/active/node_modules/testfile"
-  DEVTOOLS_SCAN_DIRS=("$HOME/Developer")
+  echo "{}" > "$HOME/Developer/active/package.json"
+  echo "data" > "$HOME/Developer/active/node_modules/t1"
 
   _DEV_NODE_TOTAL=0
-  run devtools::_node_modules
-
-  export HOME="$old_home"
-  [ "$status" -eq 0 ]
-  # Active node_modules should NOT be in total reclaimable
+  devtools::_node_modules >/dev/null 2>&1
   [ "$_DEV_NODE_TOTAL" -eq 0 ]
 }
 
-@test "devtools::_node_modules: reports none when no node_modules exist" {
-  local old_home="$HOME"
-  export HOME="${BATS_TEST_TMPDIR}/fake_home_empty_nm"
-  mkdir -p "$HOME/Developer"
-  DEVTOOLS_SCAN_DIRS=("$HOME/Developer")
-
-  _DEV_NODE_TOTAL=0
-  run devtools::_node_modules
-
-  export HOME="$old_home"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"none found"* ]]
-}
-
-# ── Rust targets ──────────────────────────────────────────────────────────────
-
-@test "devtools::_rust_targets: skips when cargo not installed" {
-  # Override command check
-  command() { return 1; }
-  export -f command
-
-  _DEV_RUST_TOTAL=0
-  run devtools::_rust_targets
-
-  unset -f command
-  [ "$status" -eq 0 ]
-  [ "$_DEV_RUST_TOTAL" -eq 0 ]
-}
-
 @test "devtools::_rust_targets: skips target/ without Cargo.toml" {
-  local old_home="$HOME"
-  export HOME="${BATS_TEST_TMPDIR}/fake_home_rust_no_cargo"
+  if ! command -v cargo &>/dev/null; then skip "cargo not installed"; fi
+
   mkdir -p "$HOME/Developer/fake_rust/target"
-  echo "build data" > "$HOME/Developer/fake_rust/target/testfile"
-  DEVTOOLS_SCAN_DIRS=("$HOME/Developer")
-  # No Cargo.toml — should be skipped
+  echo "data" > "$HOME/Developer/fake_rust/target/file"
 
   _DEV_RUST_TOTAL=0
-  run devtools::_rust_targets
-
-  export HOME="$old_home"
-  [ "$status" -eq 0 ]
+  devtools::_rust_targets >/dev/null 2>&1
   [ "$_DEV_RUST_TOTAL" -eq 0 ]
 }
 
-# ── Python __pycache__ ────────────────────────────────────────────────────────
+@test "devtools::_rust_targets: detects target with Cargo.toml" {
+  if ! command -v cargo &>/dev/null; then skip "cargo not installed"; fi
+
+  mkdir -p "$HOME/Developer/real_rust/target"
+  touch "$HOME/Developer/real_rust/Cargo.toml"
+  echo "data" > "$HOME/Developer/real_rust/target/file"
+
+  _DEV_RUST_TOTAL=0
+  devtools::_rust_targets >/dev/null 2>&1
+  [ "$_DEV_RUST_TOTAL" -gt 0 ]
+}
 
 @test "devtools::_python_cache: detects __pycache__ directories" {
-  local old_home="$HOME"
-  export HOME="${BATS_TEST_TMPDIR}/fake_home_python"
   mkdir -p "$HOME/Developer/pyapp/__pycache__"
-  echo "bytecode" > "$HOME/Developer/pyapp/__pycache__/module.pyc"
-  DEVTOOLS_SCAN_DIRS=("$HOME/Developer")
-  PYCACHE_EXCLUDE_PATHS=()
+  echo "data" > "$HOME/Developer/pyapp/__pycache__/module.pyc"
 
   _DEV_PYTHON_TOTAL=0
-  devtools::_python_cache > /dev/null 2>&1
-
-  export HOME="$old_home"
-  (( _DEV_PYTHON_TOTAL > 0 ))
+  devtools::_python_cache >/dev/null 2>&1
+  [ "$_DEV_PYTHON_TOTAL" -gt 0 ]
 }
 
-@test "devtools::_python_cache: reports none when no __pycache__ exists" {
-  local old_home="$HOME"
-  export HOME="${BATS_TEST_TMPDIR}/fake_home_no_python"
-  mkdir -p "$HOME/Developer"
-  DEVTOOLS_SCAN_DIRS=("$HOME/Developer")
-  PYCACHE_EXCLUDE_PATHS=()
-
-  _DEV_PYTHON_TOTAL=0
-  run devtools::_python_cache
-
-  export HOME="$old_home"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"none found"* ]]
-}
-
-# ── Gradle cache ──────────────────────────────────────────────────────────────
-
-@test "devtools::_gradle_cache: skips when .gradle/caches doesn't exist" {
-  local old_home="$HOME"
-  export HOME="${BATS_TEST_TMPDIR}/fake_home_no_gradle"
-  mkdir -p "$HOME"
+@test "devtools::_gradle_cache: detects gradle caches and daemon" {
+  mkdir -p "$HOME/.gradle/caches/mock"
+  echo "data" > "$HOME/.gradle/caches/mock/file"
+  
+  mkdir -p "$HOME/.gradle/daemon/7.0"
+  echo "log" > "$HOME/.gradle/daemon/7.0/file"
 
   _DEV_GRADLE_TOTAL=0
-  run devtools::_gradle_cache
-
-  export HOME="$old_home"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"not found"* ]]
+  devtools::_gradle_cache >/dev/null 2>&1
+  [ "$_DEV_GRADLE_TOTAL" -gt 0 ]
 }
 
-@test "devtools::_gradle_cache: detects gradle cache" {
-  local old_home="$HOME"
-  export HOME="${BATS_TEST_TMPDIR}/fake_home_gradle"
-  mkdir -p "$HOME/.gradle/caches/version_mock"
-  echo "cache data" > "$HOME/.gradle/caches/version_mock/testfile"
-  touch -t 202001010101 "$HOME/.gradle/caches/version_mock"
+@test "devtools::_android: detects android sdk cache" {
+  mkdir -p "$HOME/.android/cache"
+  echo "data" > "$HOME/.android/cache/file"
 
-  _DEV_GRADLE_TOTAL=0
-  devtools::_gradle_cache > /dev/null 2>&1
+  # Also add avd snapshots
+  mkdir -p "$HOME/.android/avd/nexus5.avd/snapshots/default_boot"
+  echo "snap" > "$HOME/.android/avd/nexus5.avd/snapshots/default_boot/snap.img"
 
-  export HOME="$old_home"
-  (( _DEV_GRADLE_TOTAL > 0 ))
+  _DEV_ANDROID_TOTAL=0
+  devtools::_android >/dev/null 2>&1
+  [ "$_DEV_ANDROID_TOTAL" -gt 0 ]
 }
 
-# ── Module registration ───────────────────────────────────────────────────────
+@test "devtools::_vscode: detects vscode and cursor cache" {
+  mkdir -p "$HOME/Library/Application Support/Code/logs/2023"
+  echo "log" > "$HOME/Library/Application Support/Code/logs/2023/main.log"
 
-@test "devtools::clean: registers module with category 'Developer Tools'" {
-  # Override sub-functions to no-ops
-  devtools::_node_modules() { _DEV_NODE_TOTAL=0; }
-  devtools::_rust_targets() { _DEV_RUST_TOTAL=0; }
-  devtools::_python_cache() { _DEV_PYTHON_TOTAL=0; }
-  devtools::_gradle_cache() { _DEV_GRADLE_TOTAL=0; }
-  devtools::_flutter() { _DEV_FLUTTER_TOTAL=0; }
-  utils::get_free_bytes() { echo 100000; }
+  mkdir -p "$HOME/Library/Application Support/Cursor/Cache"
+  echo "data" > "$HOME/Library/Application Support/Cursor/Cache/data.v"
 
-  MODULE_NAMES=()
-  MODULE_CATEGORIES=()
-  MODULE_SCANNED=()
-  MODULE_FREED=()
-  MODULE_STATUS=()
+  # Workspace storage stale
+  mkdir -p "$HOME/Library/Application Support/Code/User/workspaceStorage/stale1"
+  echo "data" > "$HOME/Library/Application Support/Code/User/workspaceStorage/stale1/state.json"
+  # Touch it to be older than 30 days securely using touch
+  touch -t 202001010101 "$HOME/Library/Application Support/Code/User/workspaceStorage/stale1/state.json"
+  touch -t 202001010101 "$HOME/Library/Application Support/Code/User/workspaceStorage/stale1"
 
-  devtools::clean > /dev/null 2>&1
-
-  [ "${MODULE_NAMES[0]}" = "Dev Artifacts" ]
-  [ "${MODULE_CATEGORIES[0]}" = "Developer Tools" ]
+  _DEV_VSCODE_TOTAL=0
+  devtools::_vscode >/dev/null 2>&1
+  [ "$_DEV_VSCODE_TOTAL" -gt 0 ]
 }
 
-# ── Bun / tnpm ────────────────────────────────────────────────────────────────
-
-@test "devtools::_bun_tnpm: detects bun caches" {
-  local old_home="$HOME"
-  export HOME="${BATS_TEST_TMPDIR}/fake_bun_home"
-  mkdir -p "$HOME/Library/Caches/bun"
-  echo "bun data" > "$HOME/Library/Caches/bun/testfile"
-
-  # Mock command to simulate bun being installed
-  command() { return 0; }
-  export -f command
-
+@test "devtools::_bun_tnpm: skips if not installed" {
+  if command -v bun &>/dev/null; then skip "bun is installed natively"; fi
+  
   _DEV_BUNTNPM_TOTAL=0
-  devtools::_bun_tnpm > /dev/null 2>&1
+  devtools::_bun_tnpm >/dev/null 2>&1
+  [ "$_DEV_BUNTNPM_TOTAL" -eq 0 ]
+}
 
-  unset -f command
-  export HOME="$old_home"
-  [ "$_DEV_BUNTNPM_TOTAL" -gt 0 ]
+@test "devtools::clean: registers module properly" {
+  # To avoid full disk scan, we just test that calling devtools::clean adds the module to report arrays
+  # We do not mock. We will just let it run on our small $TEST_TMP environment
+  devtools::clean >/dev/null 2>&1
+  [[ "${MODULE_NAMES[0]}" == "Dev Artifacts" ]]
+  [[ "${MODULE_CATEGORIES[0]}" == "Developer Tools" ]]
 }

@@ -16,8 +16,8 @@ docker::clean() {
     return 0
   fi
 
-  local disk_before
-  disk_before=$(utils::get_free_bytes)
+  local freed_before=$TOTAL_FREED
+  local dryrun_before=$TOTAL_DRYRUN_BYTES
 
   # Get Docker's pre-cleanup disk usage for scanning estimate
   local docker_usage=0
@@ -54,10 +54,14 @@ docker::clean() {
   docker::_volumes
   docker::_build_cache
 
-  local disk_after
-  disk_after=$(utils::get_free_bytes)
-  local freed=$(( disk_after - disk_before ))
-  if (( freed < 0 )); then freed=0; fi
+  local freed=$(( TOTAL_FREED - freed_before ))
+  local dryrun_freed=$(( TOTAL_DRYRUN_BYTES - dryrun_before ))
+  local projected=0
+  if [[ "$DRY_RUN" == "true" ]]; then
+    projected="$dryrun_freed"
+  else
+    projected="$freed"
+  fi
 
   module_summary "Docker" "$docker_usage"
 
@@ -65,7 +69,7 @@ docker::clean() {
   if (( docker_usage > 0 )); then
     status="$docker_usage"
   fi
-  utils::register_module "Docker" "Developer Tools" "$docker_usage" "$freed" "$status"
+  utils::register_module "Docker" "Developer Tools" "$docker_usage" "$freed" "$status" "$projected"
 }
 
 # ── Internal helpers ──────────────────────────────────────────────────────────

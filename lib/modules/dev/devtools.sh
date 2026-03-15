@@ -87,8 +87,8 @@ devtools::clean() {
 
   local module_scanned=0
 
-  local disk_before
-  disk_before=$(utils::get_free_bytes)
+  local freed_before=$TOTAL_FREED
+  local dryrun_before=$TOTAL_DRYRUN_BYTES
 
   devtools::_node_modules
   module_scanned=$(( module_scanned + _DEV_NODE_TOTAL ))
@@ -120,10 +120,20 @@ devtools::clean() {
   devtools::_flutter
   module_scanned=$(( module_scanned + _DEV_FLUTTER_TOTAL ))
 
-  local disk_after
-  disk_after=$(utils::get_free_bytes)
-  local freed=$(( disk_after - disk_before ))
-  if (( freed < 0 )); then freed=0; fi
+  devtools::_android
+  module_scanned=$(( module_scanned + _DEV_ANDROID_TOTAL ))
+
+  devtools::_vscode
+  module_scanned=$(( module_scanned + _DEV_VSCODE_TOTAL ))
+
+  local freed=$(( TOTAL_FREED - freed_before ))
+  local dryrun_freed=$(( TOTAL_DRYRUN_BYTES - dryrun_before ))
+  local projected=0
+  if [[ "$DRY_RUN" == "true" ]]; then
+    projected="$dryrun_freed"
+  else
+    projected="$freed"
+  fi
 
   module_summary "Dev Artifacts" "$module_scanned"
 
@@ -132,7 +142,7 @@ devtools::clean() {
     status="$module_scanned"
   fi
 
-  utils::register_module "Dev Artifacts" "Developer Tools" "$module_scanned" "$freed" "$status"
+  utils::register_module "Dev Artifacts" "Developer Tools" "$module_scanned" "$freed" "$status" "$projected"
 }
 
 # ── Internal state ────────────────────────────────────────────────────────────
@@ -147,6 +157,8 @@ _DEV_PNPM_TOTAL=0
 _DEV_FLUTTER_TOTAL=0
 _DEV_PYMODERN_TOTAL=0
 _DEV_BUNTNPM_TOTAL=0
+_DEV_ANDROID_TOTAL=0
+_DEV_VSCODE_TOTAL=0
 
 # ── a) node_modules ──────────────────────────────────────────────────────────
 devtools::_node_modules() {
@@ -163,11 +175,20 @@ devtools::_node_modules() {
     exclude_args+=("$arg")
   done < <(devtools::_build_exclude_args DEVTOOLS_EXCLUDE_PATHS)
 
+  local _seen_node_modules="|"
+
   for scan_dir in "${DEVTOOLS_SCAN_DIRS[@]}"; do
     [[ -d "$scan_dir" ]] || continue
 
     while IFS= read -r nm_dir; do
       [[ -n "$nm_dir" ]] || continue
+      
+      local canonical
+      canonical="$(cd "$nm_dir" 2>/dev/null && pwd -P)" || continue
+      if [[ "$_seen_node_modules" == *"|$canonical|"* ]]; then
+        continue
+      fi
+      _seen_node_modules="${_seen_node_modules}${canonical}|"
       local size_bytes
       size_bytes=$(utils::get_size_bytes "$nm_dir")
       (( total_count++ )) || true
@@ -239,11 +260,21 @@ devtools::_rust_targets() {
     exclude_args+=("$arg")
   done < <(devtools::_build_exclude_args DEVTOOLS_EXCLUDE_PATHS)
 
+  local _seen_rust_targets="|"
+
   for scan_dir in "${DEVTOOLS_SCAN_DIRS[@]}"; do
     [[ -d "$scan_dir" ]] || continue
 
     while IFS= read -r target_dir; do
       [[ -n "$target_dir" ]] || continue
+      
+      local canonical
+      canonical="$(cd "$target_dir" 2>/dev/null && pwd -P)" || continue
+      if [[ "$_seen_rust_targets" == *"|$canonical|"* ]]; then
+        continue
+      fi
+      _seen_rust_targets="${_seen_rust_targets}${canonical}|"
+
       local parent_dir
       parent_dir=$(dirname "$target_dir")
       # Only consider if sibling Cargo.toml exists (actual Rust project)
@@ -325,24 +356,36 @@ devtools::_python_cache() {
 devtools::_gradle_cache() {
   _DEV_GRADLE_TOTAL=0
   local path="$HOME/.gradle/caches"
-  [[ -d "$path" ]] || { log::info "Gradle cache: not found — skipping."; return 0; }
+  local daemon_path="$HOME/.gradle/daemon"
+  
+  if [[ ! -d "$path" ]] && [[ ! -d "$daemon_path" ]]; then
+    log::info "Gradle cache: not found — skipping."
+    return 0
+  fi
 
   local total=0
-  # Age-gate: only delete version cache dirs older than 30 days
-  while IFS= read -r cache_dir; do
-    [[ -n "$cache_dir" ]] || continue
-    local size
-    size=$(utils::get_size_bytes "$cache_dir")
-    (( size > 0 )) || continue
-    log::info "  Gradle cache (stale): $(basename "$cache_dir") — $(utils::format_bytes "$size")"
-    safe_rm "$cache_dir" "Gradle cache: $(basename "$cache_dir")"
-    total=$(( total + size ))
-  done < <(find "$path" -mindepth 1 -maxdepth 1 -type d -mtime +30 2>/dev/null || true)
+
+  if [[ -d "$path" ]]; then
+    local size_bytes
+    size_bytes=$(utils::get_size_bytes "$path")
+    if (( size_bytes > 0 )); then
+      log::info "Gradle cache: $(utils::format_bytes "$size_bytes")"
+      safe_rm "$path" "Gradle cache"
+      total=$(( total + size_bytes ))
+    fi
+  fi
+
+  if [[ -d "$daemon_path" ]]; then
+    local daemon_bytes
+    daemon_bytes=$(utils::get_size_bytes "$daemon_path")
+    if (( daemon_bytes > 0 )); then
+      log::info "Gradle daemon logs: $(utils::format_bytes "$daemon_bytes")"
+      safe_rm "$daemon_path" "Gradle daemon logs"
+      total=$(( total + daemon_bytes ))
+    fi
+  fi
 
   _DEV_GRADLE_TOTAL=$total
-  if (( total == 0 )); then
-    log::info "Gradle cache: no stale entries (all < 30 days old)."
-  fi
 }
 
 # ── e) Ruby Bundler + Gem cache ───────────────────────────────────────────────
@@ -478,12 +521,20 @@ devtools::_flutter() {
   log::info "Scanning for Flutter build artifacts..."
 
   local total_bytes=0
+  local _seen_flutter_projects="|"
 
   # Find Flutter projects by locating pubspec.yaml in scan dirs
   while IFS= read -r pubspec; do
     [[ -n "$pubspec" ]] || continue
     local project_dir
     project_dir="$(dirname "$pubspec")"
+
+    local canonical
+    canonical="$(cd "$project_dir" 2>/dev/null && pwd -P)" || continue
+    if [[ "$_seen_flutter_projects" == *"|$canonical|"* ]]; then
+      continue
+    fi
+    _seen_flutter_projects="${_seen_flutter_projects}${canonical}|"
 
     # build/ directory
     if [[ -d "${project_dir}/build" ]]; then
@@ -510,7 +561,6 @@ devtools::_flutter() {
     done
   )
 
-  # ~/.pub-cache — report and prompt separately
   if [[ -d "$HOME/.pub-cache" ]]; then
     local pub_size
     pub_size=$(utils::get_size_bytes "$HOME/.pub-cache")
@@ -602,3 +652,89 @@ devtools::_bun_tnpm() {
 
   _DEV_BUNTNPM_TOTAL=$total
 }
+
+# ── j) Android SDK Caches ────────────────────────────────────────────────────
+devtools::_android() {
+  _DEV_ANDROID_TOTAL=0
+  local total=0
+
+  if [[ ! -d "$HOME/.android" ]] && [[ ! -d "$HOME/Library/Android/sdk" ]]; then
+    log::verbose "Android paths not found — skipping."
+    return 0
+  fi
+
+  local -a android_paths=(
+    "$HOME/.android/cache"
+    "$HOME/Library/Android/sdk/.downloadIntermediates"
+    "$HOME/Library/Android/sdk/system-images/.download"
+  )
+
+  for p in "${android_paths[@]}"; do
+    [[ -d "$p" ]] || continue
+    local size
+    size=$(utils::get_size_bytes "$p")
+    (( size > 0 )) || continue
+    total=$(( total + size ))
+    safe_rm "$p" "Android SDK cache: $(basename "$p")"
+  done
+
+  # Process AVD snapshots
+  local avd_dir="$HOME/.android/avd"
+  if [[ -d "$avd_dir" ]]; then
+    while IFS= read -r snapshot_dir; do
+      [[ -n "$snapshot_dir" ]] || continue
+      local size
+      size=$(utils::get_size_bytes "$snapshot_dir")
+      (( size > 0 )) || continue
+      total=$(( total + size ))
+      safe_rm "$snapshot_dir" "Android AVD snapshot"
+    done < <(find "$avd_dir" -mindepth 2 -maxdepth 4 -type d -name "snapshots" 2>/dev/null || true)
+  fi
+
+  _DEV_ANDROID_TOTAL=$total
+}
+
+# ── k) VS Code / Editor Caches ───────────────────────────────────────────────
+devtools::_vscode() {
+  _DEV_VSCODE_TOTAL=0
+  local total=0
+
+  local -a subdirs=(
+    "logs"
+    "Cache"
+    "CachedData"
+    "CachedExtensionVSIXs"
+    "CachedExtensions"
+  )
+
+  for editor in "Code" "Cursor"; do
+    local base="$HOME/Library/Application Support/$editor"
+    [[ -d "$base" ]] || continue
+
+    for sub in "${subdirs[@]}"; do
+      local p="$base/$sub"
+      [[ -d "$p" ]] || continue
+      local size
+      size=$(utils::get_size_bytes "$p")
+      (( size > 0 )) || continue
+      total=$(( total + size ))
+      safe_rm "$p" "$editor cache/log: $sub"
+    done
+
+    # Workspace storage older than 30 days
+    local storage="$base/User/workspaceStorage"
+    if [[ -d "$storage" ]]; then
+      while IFS= read -r stale_dir; do
+        [[ -n "$stale_dir" ]] || continue
+        local size
+        size=$(utils::get_size_bytes "$stale_dir")
+        (( size > 0 )) || continue
+        total=$(( total + size ))
+        safe_rm "$stale_dir" "$editor stale workspace: $(basename "$stale_dir")"
+      done < <(find "$storage" -mindepth 1 -maxdepth 1 -type d -mtime +30 2>/dev/null || true)
+    fi
+  done
+
+  _DEV_VSCODE_TOTAL=$total
+}
+

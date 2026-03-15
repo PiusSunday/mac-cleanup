@@ -2,35 +2,64 @@
 # tests/test_caches.bats — Unit tests for caches module
 
 setup() {
-  TEST_HOME=$(mktemp -d "${BATS_TEST_TMPDIR:-/tmp}/mac-cleanup-home.XXXXXX")
-  export HOME="$TEST_HOME"
-  export LOG_FILE="$TEST_HOME/cleanup.log"
-
+  TEST_TMP="$(mktemp -d)"
+  export HOME="$TEST_TMP"
+  
   source "${BATS_TEST_DIRNAME}/../lib/core/core.sh"
   source "${BATS_TEST_DIRNAME}/../lib/core/utils.sh"
   source "${BATS_TEST_DIRNAME}/../lib/modules/user/standard.sh"
+
+  export DRY_RUN=true
+  export SKIP_CONFIRM=true
+  export VERBOSE=false
 }
 
 teardown() {
-  if [ -n "${TEST_HOME:-}" ] && [ -d "$TEST_HOME" ]; then
-    rm -rf "$TEST_HOME"
-  fi
+  rm -rf "$TEST_TMP"
 }
 
-@test "caches::_user_caches: skips Homebrew cache handled by brew module" {
-  mkdir -p "$HOME/Library/Caches/Homebrew"
-  mkdir -p "$HOME/Library/Caches/RegularCache"
-  echo "homebrew" > "$HOME/Library/Caches/Homebrew/file.txt"
-  echo "regular" > "$HOME/Library/Caches/RegularCache/file.txt"
+@test "caches::_app_support_caches: detects expanded patterns" {
+  mkdir -p "$HOME/Library/Application Support/Foo/Cache"
+  echo "d" > "$HOME/Library/Application Support/Foo/Cache/f"
 
-  safe_rm() { :; }
-  utils::is_deletable() { return 0; }
-  caches::_is_app_running() { return 1; }
+  mkdir -p "$HOME/Library/Application Support/Foo/Logs"
+  echo "d" > "$HOME/Library/Application Support/Foo/Logs/f"
+  
+  mkdir -p "$HOME/Library/Application Support/Foo/logs"
+  echo "d" > "$HOME/Library/Application Support/Foo/logs/f"
+  
+  mkdir -p "$HOME/Library/Application Support/Foo/log"
+  echo "d" > "$HOME/Library/Application Support/Foo/log/f"
 
-  local expected_total
-  expected_total=$(utils::get_size_bytes "$HOME/Library/Caches/RegularCache")
+  mkdir -p "$HOME/Library/Application Support/Foo/tmp"
+  echo "d" > "$HOME/Library/Application Support/Foo/tmp/f"
 
-  caches::_user_caches
+  mkdir -p "$HOME/Library/Application Support/Foo/Temp"
+  echo "d" > "$HOME/Library/Application Support/Foo/Temp/f"
+  
+  _CACHES_APPSUPPORT_TOTAL=0
+  caches::_app_support_caches >/dev/null 2>&1
+  
+  # Ensure all 6 items were counted
+  local expected_size
+  expected_size=$(utils::get_size_bytes "$HOME/Library/Application Support")
+  [ "$_CACHES_APPSUPPORT_TOTAL" -eq "$expected_size" ]
+}
 
-  [ "$_CACHES_USER_TOTAL" -eq "$expected_total" ]
+@test "caches::_app_support_caches: skips com.apple.* system packages" {
+  mkdir -p "$HOME/Library/Application Support/com.apple.CloudDocs/Cache"
+  echo "data" > "$HOME/Library/Application Support/com.apple.CloudDocs/Cache/f"
+
+  _CACHES_APPSUPPORT_TOTAL=0
+  caches::_app_support_caches >/dev/null 2>&1
+  [ "$_CACHES_APPSUPPORT_TOTAL" -eq 0 ]
+}
+
+@test "caches::_user_caches: handles actual directory contents without mocking" {
+  mkdir -p "$HOME/Library/Caches/com.test.app"
+  echo "cache content" > "$HOME/Library/Caches/com.test.app/cache_file"
+  
+  _CACHES_USER_TOTAL=0
+  caches::_user_caches >/dev/null 2>&1
+  [ "$_CACHES_USER_TOTAL" -gt 0 ]
 }

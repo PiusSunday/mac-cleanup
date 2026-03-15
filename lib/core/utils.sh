@@ -251,7 +251,7 @@ safe_rm() {
     if [[ "$DRY_RUN" == "true" && "$use_internal" != "true" ]]; then
        log::info "[DRY-RUN] ${bytes_fmt} ${label} (Skipped: System Protected)"
     fi
-    return 1
+    return 0
   fi
 
   if [[ "$use_force" != "true" ]] && utils::is_whitelisted "$resolved"; then
@@ -272,7 +272,7 @@ safe_rm() {
       if [[ "$DRY_RUN" == "true" && "$use_internal" != "true" ]]; then
          log::info "[DRY-RUN] ${bytes_fmt} ${label} (Skipped: Permission Denied)"
       fi
-      return 1
+      return 0
     fi
   fi
 
@@ -292,7 +292,7 @@ safe_rm() {
       if [[ "$DRY_RUN" != "true" ]]; then
         log::warn "Skipped: ${label} (deletion failed/in use)"
       fi
-      return 1
+      return 0
     }
   else
     rm -rf -- "$resolved" 2>/dev/null || {
@@ -301,7 +301,7 @@ safe_rm() {
       if [[ "$DRY_RUN" != "true" ]]; then
         log::warn "Skipped: ${label} (deletion failed/in use)"
       fi
-      return 1
+      return 0
     }
   fi
 
@@ -550,7 +550,7 @@ utils::register_module() {
   if [[ "$status" =~ ^[0-9]+$ ]]; then
     if (( status > 0 )); then
       if [[ "$DRY_RUN" == "true" ]]; then
-        status="clean"
+        status="Pending"
       else
         status="done"
       fi

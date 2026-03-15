@@ -13,8 +13,8 @@ orphans::clean() {
   _ORPHAN_TOTAL=0
   ORPHAN_CANDIDATES=()
 
-  local disk_before
-  disk_before=$(utils::get_free_bytes)
+  local freed_before=$TOTAL_FREED
+  local dryrun_before=$TOTAL_DRYRUN_BYTES
 
   local installed_tmp
   installed_tmp=$(mktemp "${TMPDIR:-/tmp}/mac-cleanup-installed.XXXXXX")
@@ -34,11 +34,13 @@ orphans::clean() {
     log::info "Orphan detection is report-only by default. Use --clean-orphans to delete candidates."
   fi
 
-  local disk_after
-  disk_after=$(utils::get_free_bytes)
-  local freed=$(( disk_after - disk_before ))
-  if (( freed < 0 )); then
-    freed=0
+  local freed=$(( TOTAL_FREED - freed_before ))
+  local dryrun_freed=$(( TOTAL_DRYRUN_BYTES - dryrun_before ))
+  local projected=0
+  if [[ "$DRY_RUN" == "true" ]]; then
+    projected="$dryrun_freed"
+  else
+    projected="$freed"
   fi
 
   module_summary "Orphans" "$_ORPHAN_TOTAL"
