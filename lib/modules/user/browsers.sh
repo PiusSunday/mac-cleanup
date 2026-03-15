@@ -7,26 +7,29 @@ browsers::clean() {
   log::section "Browsers"
 
   _BROWSERS_TOTAL=0
-  local disk_before
-  disk_before=$(utils::get_free_bytes)
+  local freed_before=$TOTAL_FREED
+  local dryrun_before=$TOTAL_DRYRUN_BYTES
 
   browsers::_chrome_versions
   browsers::_edge_versions
   browsers::_safari_icons
-  browsers::_safari_cache
   browsers::_arc
   browsers::_zen
 
-  local disk_after
-  disk_after=$(utils::get_free_bytes)
-  local freed=$(( disk_after - disk_before ))
-  if (( freed < 0 )); then freed=0; fi
+  local freed=$(( TOTAL_FREED - freed_before ))
+  local dryrun_freed=$(( TOTAL_DRYRUN_BYTES - dryrun_before ))
+  local projected=0
+  if [[ "$DRY_RUN" == "true" ]]; then
+    projected="$dryrun_freed"
+  else
+    projected="$freed"
+  fi
 
   module_summary "Browsers" "$_BROWSERS_TOTAL"
 
   local status="clean"
   if (( _BROWSERS_TOTAL > 0 )); then status="$_BROWSERS_TOTAL"; fi
-  utils::register_module "Browsers" "Caches & Logs" "$_BROWSERS_TOTAL" "$freed" "$status"
+  utils::register_module "Browsers" "Caches & Logs" "$_BROWSERS_TOTAL" "$freed" "$status" "$projected"
 }
 
 browsers::_add_scanned() {
@@ -77,15 +80,6 @@ browsers::_safari_icons() {
   size=$(utils::get_size_bytes "$cache")
   browsers::_add_scanned "$size"
   safe_rm_contents "$cache" "Safari Favicon Cache"
-}
-
-browsers::_safari_cache() {
-  local cache="$HOME/Library/Caches/com.apple.Safari"
-  [[ -d "$cache" ]] || return 0
-  local size
-  size=$(utils::get_size_bytes "$cache")
-  browsers::_add_scanned "$size"
-  safe_rm "$cache" "Safari Cache"
 }
 
 browsers::_arc() {

@@ -9,8 +9,8 @@ devops_reset::run() {
     utils::confirm "Proceed with DevOps Reset mode?" || return 0
   fi
 
-  local disk_before
-  disk_before=$(utils::get_free_bytes)
+  local freed_before=$TOTAL_FREED
+  local dryrun_before=$TOTAL_DRYRUN_BYTES
 
   devops_reset::_docker_full
   devops_reset::_node_deep
@@ -20,11 +20,13 @@ devops_reset::run() {
   devops_reset::_rust_deep
   devops_reset::_ml_frameworks
 
-  local disk_after
-  disk_after=$(utils::get_free_bytes)
-  local freed=$(( disk_after - disk_before ))
-  if (( freed < 0 )); then
-    freed=0
+  local freed=$(( TOTAL_FREED - freed_before ))
+  local dryrun_freed=$(( TOTAL_DRYRUN_BYTES - dryrun_before ))
+  local projected=0
+  if [[ "$DRY_RUN" == "true" ]]; then
+    projected="$dryrun_freed"
+  else
+    projected="$freed"
   fi
 
   module_summary "DevOps Reset" "$freed"
@@ -34,7 +36,7 @@ devops_reset::run() {
     status="$freed"
   fi
 
-  utils::register_module "DevOps Reset" "Developer Tools" "$freed" "$freed" "$status"
+  utils::register_module "DevOps Reset" "Developer Tools" "$freed" "$freed" "$status" "$projected"
 }
 
 devops_reset::_docker_full() {

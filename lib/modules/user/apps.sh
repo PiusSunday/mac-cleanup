@@ -7,22 +7,26 @@ apps::clean() {
   log::section "Apps & Containers"
 
   _APPS_TOTAL=0
-  local disk_before
-  disk_before=$(utils::get_free_bytes)
+  local freed_before=$TOTAL_FREED
+  local dryrun_before=$TOTAL_DRYRUN_BYTES
 
   apps::_clean_containers "$HOME/Library/Containers"
   apps::_clean_containers "$HOME/Library/Group Containers"
 
-  local disk_after
-  disk_after=$(utils::get_free_bytes)
-  local freed=$(( disk_after - disk_before ))
-  if (( freed < 0 )); then freed=0; fi
+  local freed=$(( TOTAL_FREED - freed_before ))
+  local dryrun_freed=$(( TOTAL_DRYRUN_BYTES - dryrun_before ))
+  local projected=0
+  if [[ "$DRY_RUN" == "true" ]]; then
+    projected="$dryrun_freed"
+  else
+    projected="$freed"
+  fi
 
   module_summary "Apps & Containers" "$_APPS_TOTAL"
 
   local status="clean"
   if (( _APPS_TOTAL > 0 )); then status="$_APPS_TOTAL"; fi
-  utils::register_module "Apps & Containers" "Caches & Logs" "$_APPS_TOTAL" "$freed" "$status"
+  utils::register_module "Apps & Containers" "Caches & Logs" "$_APPS_TOTAL" "$freed" "$status" "$projected"
 }
 
 apps::_add_scanned() {

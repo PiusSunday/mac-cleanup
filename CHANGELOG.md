@@ -7,6 +7,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.4.2] - 2026-03-14
+
+### Added
+
+- **CLI**: Added `--version` flag.
+- **Developer**: Added targeting for Android SDK caches (`~/.android`, `.downloadIntermediates`) and AVD snapshots.
+- **Developer**: Added targeting for VS Code and Cursor logs, caches, and `workspaceStorage` older than 30 days.
+
+### Changed
+
+- **CLI**: `--verbose` flag now correctly behaves as a modifier and no longer forces the tool into unexpected prompts.
+- **System**: DevTools cache sweeping (Node, Rust, Flutter) uses path deduplication to significantly reduce duplicate log output.
+- **System**: Expanded the Application Support cache sweep to match case-insensitive variants of `log/logs/tmp/temp` while strictly skipping `com.apple.*` system boundaries.
+- **Developer**: Reverted the Gradle age-gate to clean the entire `~/.gradle/caches` folder and expanded coverage to include `~/.gradle/daemon` logs.
+- **Developer**: Downgraded logs from `warning` to `verbose` when optional tooling binaries (like Ruby, Rust, Dart) are not found.
+
+### Fixed
+
+- **CRITICAL**: Fixed a terminal crash where SIP/TCC permissions on `com.apple.Safari` would immediately abort the entire script inside `browsers.sh`. Safari cache cleanup was removed to comply with macOS privacy controls, and module wrapping logic was implemented to guarantee isolated failures don't halt other modules.
+- **Reporting**: Rewrote the entire background calculation tracking to eliminate an APFS race condition `macOS` created when responding to `df -k`. The summary report table's `Found` and `Reclaimable` byte volumes will now mathematically sync exactly 1:1 using the new internal `TOTAL_FREED` accumulator across all 11 cleaning modules.
+- **Reporting**: Dry run table output no longer marks `Clean` for everything containing `0 bytes` deleted. Output now reads `Pending` to clarify what exactly is waiting to be processed in live environments.
+- **Testing**: Complete overhaul of `test_browsers.bats`, `test_caches.bats`, and `test_devtools.bats` to rely on actual local temporary file structures rather than error-prone mock function overrides. Addressed multiple bugs in the test suite isolated to `set -e` behavior and Bash 3.2 compatibility.
+
 ## [v0.4.1] - 2026-03-14
 
 ### Added

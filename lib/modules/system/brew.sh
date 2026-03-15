@@ -9,8 +9,8 @@ brew::clean() {
   fi
   log::section "Homebrew"
 
-  local disk_before
-  disk_before=$(utils::get_free_bytes)
+  local freed_before=$TOTAL_FREED
+  local dryrun_before=$TOTAL_DRYRUN_BYTES
 
   # Measure cache size before cleanup — use brew --cache with fallback
   local brew_cache_size=0
@@ -37,10 +37,14 @@ brew::clean() {
     utils::with_spinner "Running brew autoremove..." brew autoremove
   fi
 
-  local disk_after
-  disk_after=$(utils::get_free_bytes)
-  local freed=$(( disk_after - disk_before ))
-  if (( freed < 0 )); then freed=0; fi
+  local freed=$(( TOTAL_FREED - freed_before ))
+  local dryrun_freed=$(( TOTAL_DRYRUN_BYTES - dryrun_before ))
+  local projected=0
+  if [[ "$DRY_RUN" == "true" ]]; then
+    projected="$dryrun_freed"
+  else
+    projected="$freed"
+  fi
 
   module_summary "Homebrew" "$brew_cache_size"
 
@@ -48,5 +52,5 @@ brew::clean() {
   if (( brew_cache_size > 0 )); then
     status="$brew_cache_size"
   fi
-  utils::register_module "Homebrew" "Caches & Logs" "$brew_cache_size" "$freed" "$status"
+  utils::register_module "Homebrew" "Caches & Logs" "$brew_cache_size" "$freed" "$status" "$projected"
 }
