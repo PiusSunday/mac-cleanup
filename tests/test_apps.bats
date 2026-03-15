@@ -20,6 +20,11 @@ setup() {
 }
 
 @test "apps::clean: registers module with category 'Caches & Logs'" {
+  # Mock functions that perform expensive I/O operations
+  utils::get_size_bytes() { echo "1024"; }
+  safe_rm_contents() { TOTAL_DRYRUN_BYTES=$(( TOTAL_DRYRUN_BYTES + 1024 )); }
+  find() { echo "/mock/dir"; }
+
   apps::clean
   [[ "${MODULE_NAMES[0]}" == "Apps & Containers" ]]
   [[ "${MODULE_CATEGORIES[0]}" == "Caches & Logs" ]]

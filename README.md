@@ -30,6 +30,7 @@ Macs aren't designed to naturally tidy up after developers. Whether you're build
 | ---------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------ | --------------- |
 | `--system`       | System        | Crash reports, `.DS_Store`, Trash, Dev caches (npm, pip)                                                                       | 1–5 GB          |
 | `--system-deep`  | Deep System   | Age-gated unified logs (14d), diagnostic logs, MacOS Installer payloads (14d), Safari content cache, `com.apple.nsurlsessiond` | 1–12 GB         |
+| `--clean-orphans`| Orphans       | Deletes suspected orphaned App containers and plists using per-item confirmation. Defaults to report-only (`Needs review`) without this flag.  | 1–10 GB         |
 | `--xcode`        | Xcode         | DerivedData, Archives (90d+), iOS DeviceSupport, Simulators, CoreSimulator logs                                                | 10–90 GB        |
 | `--docker`       | Docker        | Precision cleanup of stopped containers, dangling images, dangling volumes, build cache                                        | 5–30 GB         |
 | `--devtools`     | Dev Artifacts | `node_modules` (orphaned), Rust `target/`, Python `__pycache__`, Flutter, Gradle, Ruby caches                                  | 5–60 GB         |

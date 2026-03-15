@@ -7,9 +7,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v0.4.2] - 2026-03-14
+## [v0.4.3] - 2026-03-15
 
-### Added
+### Fixed
+
+- **CRITICAL**: Hardcoded `LC_NUMERIC=C` internally to force standard POSIX formatting across all background `printf` and `bc` calculations. This fixes a widespread terminal crash where `mac-cleanup` would throw `printf: invalid number` if a user's macOS host region (like French or German) was set to use commas instead of periods for decimals.
+- **Reporting**: Added explicit instructions to the `Needs review` legend in the summary report and the warning prompt inside the `Orphans` module to clarify that users must specifically execute `mac-cleanup --clean-orphans` to delete those suspected candidates.
+
+## [v0.4.2] - 2026-03-14
 
 - **CLI**: Added `--version` flag.
 - **Developer**: Added targeting for Android SDK caches (`~/.android`, `.downloadIntermediates`) and AVD snapshots.
