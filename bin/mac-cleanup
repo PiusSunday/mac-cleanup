@@ -66,6 +66,7 @@ ${BOLD}TARGETS:${RESET}
   --devtools, -D     Clean orphaned node_modules, Rust targets, __pycache__, Gradle, Flutter
   --snapshots, -s    Delete local Time Machine snapshots
   --simulators       Delete unusable Xcode simulator runtimes and stale devices
+  --purge-stale      Delete build artifacts in projects untouched for 90+ days
   --caches, -c       Clear ~/Library/Caches, Zsh, Spotify, JetBrains, and app caches
   --mail, -m         Clean old Mail downloads and recent-item metadata
   --brew, -b         Run brew cleanup and autoremove
@@ -94,6 +95,7 @@ ${BOLD}EXAMPLES:${RESET}
   mac-cleanup --devops-reset --yes  Nuclear cleanup of dev toolchain caches
   mac-cleanup --show-log            Show deletion operation log
   mac-cleanup --simulators          Reclaim unusable Xcode simulator runtimes
+  mac-cleanup --purge-stale         Remove build artifacts from dormant projects
   mac-cleanup --version             Show the current version
 
 ${YELLOW}${WARN}  Running mac-cleanup without cleanup targets defaults to a safe --all --dry-run preview.${RESET}
@@ -215,6 +217,20 @@ parse_flags() {
         TARGET_SIMULATORS=true
         TARGET_XCODE=true
         target_specified=true
+        ;;
+      --purge-stale)
+        PURGE_STALE=true
+        TARGET_DEVTOOLS=true
+        target_specified=true
+        ;;
+      --stale-days)
+        shift
+        if [[ "${1:-}" =~ ^[0-9]+$ ]]; then
+          STALE_PROJECT_DAYS="$1"
+        else
+          log::error "--stale-days requires a number of days"
+          exit 1
+        fi
         ;;
       --show-log)
         SHOW_OPERATION_LOG=true
@@ -389,8 +405,21 @@ print_report() {
     printf '  %sDisk%s            %s free  →  %s after cleanup\n' \
       "${DIM}" "${RESET}" "$free_before_fmt" "$(utils::format_bytes "$(( disk_before + total_bytes ))")"
   else
-    printf '  %sDisk%s            %s free  →  %s free\n' \
+    # Show the projection next to the measured result. An estimate that misses
+    # badly is exactly how the Docker over-reporting went unnoticed, so make any
+    # future drift visible rather than silently printing only the outcome.
+    local measured=$(( disk_after - disk_before ))
+    printf '  %sDisk%s            %s free  →  %s free' \
       "${DIM}" "${RESET}" "$free_before_fmt" "$(utils::format_bytes "$disk_after")"
+    if (( total_bytes > 0 )) && (( measured >= 0 )); then
+      local drift=$(( total_bytes - measured ))
+      local slack=$(( total_bytes / 5 ))
+      if (( drift > slack )) && (( drift > 104857600 )); then
+        printf '  %s(estimated %s — %s less than projected)%s' \
+          "${YELLOW}" "$(utils::format_bytes "$total_bytes")" "$(utils::format_bytes "$drift")" "${RESET}"
+      fi
+    fi
+    printf '\n'
   fi
   local tilde='~'
   printf '  %sLog%s             %s\n' "${DIM}" "${RESET}" "${LOG_FILE/#$HOME/$tilde}"

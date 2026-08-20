@@ -185,3 +185,19 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"no modules ran"* ]]
 }
+
+@test "print_report: flags a live run that freed materially less than projected" {
+  fixture
+  DRY_RUN=false
+  # Projected 6 KB; only 1 KB of free space actually appeared.
+  MODULE_PROJECTED=(4294967296 0 0 0 0 0)
+  run print_report 12 10240 10240
+  [[ "$output" == *"less than projected"* ]]
+}
+
+@test "print_report: stays quiet when the projection roughly matched" {
+  fixture
+  DRY_RUN=false
+  run print_report 12 10240 20480
+  [[ "$output" != *"less than projected"* ]]
+}

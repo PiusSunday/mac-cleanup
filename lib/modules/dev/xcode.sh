@@ -46,6 +46,13 @@ xcode::clean() {
 # Module-level scanned counter (accumulated by helpers)
 MODULE_XCODE_SCANNED=0
 
+# Runtime UUIDs this run actually deleted, awaited before pruning devices.
+_XCODE_DELETED_RUNTIME_IDS=""
+# Runtime identifiers (com.apple.CoreSimulator.SimRuntime.iOS-26-4) whose
+# devices will be orphaned. Used only to size the dry-run estimate; a live run
+# measures the devices directory before and after instead.
+_XCODE_SUPERSEDED_RUNTIME_IDS=""
+
 xcode::_derived_data() {
   local path="$HOME/Library/Developer/Xcode/DerivedData"
   if [[ ! -d "$path" ]]; then
@@ -114,20 +121,17 @@ xcode::_simulator_caches() {
   safe_rm "$path" "CoreSimulator caches"
 }
 
+# Device pruning has a single owner: xcode::_simulator_devices, which runs after
+# the runtime sweep. Pruning here as well accomplished nothing — it ran before
+# any runtime was deleted, so no device was orphaned yet — and hid the fact that
+# the later call was firing too early too.
 xcode::_simulators() {
   # Guard: simctl requires full Xcode, not just Command Line Tools
   if ! xcrun --find simctl &>/dev/null 2>&1; then
     log::info "simctl not available — skipping simulator cleanup."
     return 0
   fi
-
-  log::info "Removing unavailable simulators..."
-  if [[ "$DRY_RUN" == "true" ]]; then
-    dry_run_or_exec xcrun simctl delete unavailable
-  else
-    utils::with_spinner "Removing unavailable simulators..." \
-      xcrun simctl delete unavailable
-  fi
+  return 0
 }
 
 xcode::_documentation_cache() {
@@ -183,12 +187,23 @@ xcode::_simulator_runtimes() {
   local newest
   newest=$(printf '%s\n' "$runtimes" | xcode::_newest_per_platform)
 
-  local line id state bytes version platform
+  local id state bytes version platform ident
   local reclaimable=0
   local superseded=0
   local superseded_bytes=0
 
-  while IFS='|' read -r id state bytes version platform; do
+  # Two runtimes can share one identifier (26.4 and 26.4.1 are both iOS-26-4).
+  # Collect the identifiers being kept so a superseded one is never credited
+  # with devices that belong to a runtime that survives.
+  local kept_idents=""
+  while IFS='|' read -r id state bytes version platform ident; do
+    [[ -n "$ident" ]] || continue
+    if printf '%s\n' "$newest" | grep -qxF "${platform}|${version}"; then
+      kept_idents="${kept_idents}${ident}"$'\n'
+    fi
+  done <<< "$runtimes"
+
+  while IFS='|' read -r id state bytes version platform ident; do
     [[ -n "$id" ]] || continue
 
     local is_newest=false
@@ -210,6 +225,9 @@ xcode::_simulator_runtimes() {
 
     (( superseded++ )) || true
     superseded_bytes=$(( superseded_bytes + bytes ))
+    if ! printf '%s' "$kept_idents" | grep -qxF "$ident"; then
+      _XCODE_SUPERSEDED_RUNTIME_IDS="${_XCODE_SUPERSEDED_RUNTIME_IDS}${ident}"$'\n'
+    fi
     log::info "  Superseded runtime: ${platform} ${version} ($(utils::format_bytes "$bytes"))"
 
     if [[ "$TARGET_SIMULATORS" != "true" ]]; then
@@ -233,9 +251,19 @@ xcode::_simulator_runtimes() {
 
   if (( superseded > 0 )) && [[ "$TARGET_SIMULATORS" != "true" ]]; then
     log::warn "  ${superseded} superseded runtime(s) found — not removed without --simulators."
+
+    # Removing a runtime also orphans every device bound to it, and those
+    # devices are often a third of the total. Advertise one combined figure so
+    # what --simulators reclaims matches what the report promised.
+    local orphaned label
+    orphaned=$(xcode::_devices_bound_to_deleted_runtimes)
+    label="${superseded} superseded Xcode simulator runtimes"
+    if (( orphaned > 0 )); then
+      label="${label} + the devices bound to them"
+    fi
     utils::register_action \
-      "${superseded} superseded Xcode simulator runtimes" \
-      "$superseded_bytes" \
+      "$label" \
+      "$(( superseded_bytes + orphaned ))" \
       "mac-cleanup --simulators"
   fi
 }
@@ -265,7 +293,8 @@ for entry in data.values():
     version = entry.get("version") or build
     platform = entry.get("platformIdentifier") or ""
     platform = platform.rsplit(".", 1)[-1] or ident.rsplit(".", 1)[-1]
-    print("%s|%s|%s|%s|%s" % (uuid, state, size, version, platform))
+    # ident is the runtime identifier device.plist records for each simulator.
+    print("%s|%s|%s|%s|%s|%s" % (uuid, state, size, version, platform, ident))
 ' 2>/dev/null || return 1
 }
 
@@ -312,6 +341,7 @@ xcode::_delete_runtime() {
   if xcrun simctl runtime delete "$id" >/dev/null 2>&1; then
     MODULE_XCODE_SCANNED=$(( MODULE_XCODE_SCANNED + bytes ))
     TOTAL_FREED=$(( TOTAL_FREED + bytes ))
+    _XCODE_DELETED_RUNTIME_IDS="${_XCODE_DELETED_RUNTIME_IDS}${id}"$'\n'
     log::success "  Removed runtime ${label} ($(utils::format_bytes "$bytes"))"
     _oplog "REMOVED" "simruntime:${label}" "$(utils::format_bytes "$bytes")"
   else
@@ -319,9 +349,40 @@ xcode::_delete_runtime() {
   fi
 }
 
+# simctl returns from `runtime delete` before the disk image is unmounted, and a
+# device only becomes "unavailable" once its runtime is gone. Waiting is what
+# makes the follow-up prune actually reclaim anything.
+xcode::_await_runtime_deletion() {
+  [[ -n "$_XCODE_DELETED_RUNTIME_IDS" ]] || return 0
+
+  local deadline=$(( $(date +%s) + ${MAC_CLEANUP_RUNTIME_WAIT:-60} ))
+  local remaining
+  while (( $(date +%s) < deadline )); do
+    remaining=0
+    local id
+    while IFS= read -r id; do
+      [[ -n "$id" ]] || continue
+      if xcrun simctl runtime list -j 2>/dev/null | grep -qF "$id"; then
+        remaining=$(( remaining + 1 ))
+      fi
+    done <<< "$_XCODE_DELETED_RUNTIME_IDS"
+
+    (( remaining == 0 )) && return 0
+    sleep 2
+  done
+
+  log::verbose "Runtime deletion still settling after the wait window; pruning anyway."
+  return 0
+}
+
 # ── Simulator devices ─────────────────────────────────────────────────────────
 # Each created device carries its own writable data volume. They accumulate
 # across Xcode upgrades and are only reported here unless --simulators is set.
+# Every device carries its own data volume, and a device bound to a runtime that
+# has just been deleted becomes unavailable — so removing superseded runtimes
+# frees the runtimes *and* their devices. On the development machine that second
+# part was 22 devices and 9.4 GB, which v0.5.0 mentioned in passing and never
+# offered to reclaim.
 xcode::_simulator_devices() {
   local devices="$HOME/Library/Developer/CoreSimulator/Devices"
   [[ -d "$devices" ]] || return 0
@@ -338,13 +399,68 @@ xcode::_simulator_devices() {
     return 0
   fi
 
-  log::info "  Simulator devices: ${count} devices, $(utils::format_bytes "$size")"
-  if command -v xcrun >/dev/null 2>&1; then
-    if [[ "$DRY_RUN" == "true" ]]; then
-      log::info "[DRY-RUN] Would run: xcrun simctl delete unavailable"
+  command -v xcrun >/dev/null 2>&1 || return 0
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    # Devices bound to the runtimes queued for deletion above will be orphaned.
+    local orphaned
+    orphaned=$(xcode::_devices_bound_to_deleted_runtimes)
+    if (( orphaned > 0 )); then
+      MODULE_XCODE_SCANNED=$(( MODULE_XCODE_SCANNED + orphaned ))
+      TOTAL_DRYRUN_BYTES=$(( TOTAL_DRYRUN_BYTES + orphaned ))
+      log::info "  Simulator devices: ${count} devices, $(utils::format_bytes "$size")"
+      log::info "[DRY-RUN] $(utils::format_bytes "$orphaned") simulator devices orphaned by the runtime removals above"
     else
-      utils::with_spinner "Deleting unavailable simulator devices..." \
-        xcrun simctl delete unavailable || true
+      log::info "  Simulator devices: ${count} devices, $(utils::format_bytes "$size") (none orphaned)"
     fi
+    return 0
   fi
+
+  xcode::_await_runtime_deletion
+
+  local before
+  before=$(utils::get_size_bytes "$devices")
+  utils::with_spinner "Deleting simulator devices orphaned by removed runtimes..." \
+    xcrun simctl delete unavailable || true
+
+  local after
+  after=$(utils::get_size_bytes "$devices")
+  local reclaimed=$(( before - after ))
+  if (( reclaimed > 0 )); then
+    MODULE_XCODE_SCANNED=$(( MODULE_XCODE_SCANNED + reclaimed ))
+    TOTAL_FREED=$(( TOTAL_FREED + reclaimed ))
+    local now
+    now=$(find "$devices" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+    log::success "  Removed $(( count - now )) orphaned devices ($(utils::format_bytes "$reclaimed"))"
+    _oplog "REMOVED" "simdevices" "$(utils::format_bytes "$reclaimed")"
+  else
+    log::info "  Simulator devices: none orphaned"
+  fi
+}
+
+# Total bytes held by devices whose runtime is queued for deletion.
+xcode::_devices_bound_to_deleted_runtimes() {
+  local devices="$HOME/Library/Developer/CoreSimulator/Devices"
+  local total=0
+
+  if [[ -z "$_XCODE_SUPERSEDED_RUNTIME_IDS" || ! -d "$devices" ]]; then
+    printf '0\n'
+    return 0
+  fi
+
+  local device_dir plist runtime
+  while IFS= read -r device_dir; do
+    [[ -d "$device_dir" ]] || continue
+    plist="$device_dir/device.plist"
+    [[ -f "$plist" ]] || continue
+    runtime=$(/usr/libexec/PlistBuddy -c "Print :runtime" "$plist" 2>/dev/null || true)
+    [[ -n "$runtime" ]] || continue
+    # device.plist stores the runtime identifier, e.g.
+    # com.apple.CoreSimulator.SimRuntime.iOS-26-4
+    if printf '%s' "$_XCODE_SUPERSEDED_RUNTIME_IDS" | grep -qxF "$runtime"; then
+      total=$(( total + $(utils::get_size_bytes "$device_dir") ))
+    fi
+  done < <(find "$devices" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true)
+
+  printf '%s\n' "$total"
 }

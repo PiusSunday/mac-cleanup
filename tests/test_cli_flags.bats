@@ -43,12 +43,12 @@ setup() {
   run "$PROJECT_ROOT/bin/mac-cleanup" --version
 
   [ "$status" -eq 0 ]
-  [ "$output" = "mac-cleanup v0.5.0" ]
+  [ "$output" = "mac-cleanup v0.5.1" ]
 }
 
 @test "cli: -V prints version and exits" {
   run "$PROJECT_ROOT/bin/mac-cleanup" -V
 
   [ "$status" -eq 0 ]
-  [ "$output" = "mac-cleanup v0.5.0" ]
+  [ "$output" = "mac-cleanup v0.5.1" ]
 }

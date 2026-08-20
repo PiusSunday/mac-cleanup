@@ -7,7 +7,7 @@ export VERBOSE=${VERBOSE:-false}
 export SKIP_CONFIRM=${SKIP_CONFIRM:-false}
 
 # ── Global Constants ───────────────────────────────────────────────────────────
-VERSION="0.5.0"
+VERSION="0.5.1"
 LOG_DIR="$HOME/.mac-cleanup"
 LOG_FILE="$LOG_DIR/cleanup.log"
 
@@ -49,6 +49,11 @@ export INCLUDE_SYSTEM_CACHES=${INCLUDE_SYSTEM_CACHES:-false}
 # Opt-in to deleting unusable Xcode simulator runtimes and stale simulator
 # devices. Off by default: runtimes are multi-gigabyte downloads.
 export TARGET_SIMULATORS=${TARGET_SIMULATORS:-false}
+
+# Opt-in to deleting build artifacts in projects that have not been touched in
+# STALE_PROJECT_DAYS. Off by default: reclaiming these costs a rebuild.
+export PURGE_STALE=${PURGE_STALE:-false}
+export STALE_PROJECT_DAYS=${STALE_PROJECT_DAYS:-90}
 
 # Per-module reporting arrays
 # Each module registers: name, category, scanned bytes, freed bytes, status,
