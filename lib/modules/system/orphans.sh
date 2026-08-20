@@ -183,6 +183,124 @@ orphans::_looks_installed() {
   return 1
 }
 
+# Is the app that owns this identifier running right now?
+#
+# `firestore` is Arc's local database. Arc was running and actively writing to
+# it, and the orphan scan still offered all 40.5 MB for deletion.
+orphans::_owner_is_running() {
+  local name="$1"
+  [[ -n "$name" ]] || return 1
+
+  if pgrep -xi "$name" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Bundle-id form: try each trailing component, longest first.
+  local candidate="$name"
+  while [[ "$candidate" == *.* ]]; do
+    local leaf="${candidate##*.}"
+    if [[ ${#leaf} -ge 4 ]] && pgrep -xi "$leaf" >/dev/null 2>&1; then
+      return 0
+    fi
+    candidate="${candidate%.*}"
+  done
+  return 1
+}
+
+# Derive owner names from what is *inside* a directory.
+#
+# A generic top-level name says nothing about ownership: "firestore" holds
+# firestore/Arc/bcny-arc-server, so the owner is Arc. Attributing by the
+# top-level name alone is what made a running browser's database look orphaned.
+orphans::_inner_owners() {
+  local dir="$1"
+  local entry
+  # Two levels reaches vendor/product layouts like firestore/Arc/bcny-arc-server.
+  while IFS= read -r entry; do
+    [[ -n "$entry" ]] || continue
+    basename "$entry"
+  done < <(find "$dir" -mindepth 1 -maxdepth 2 -type d 2>/dev/null | head -40)
+}
+
+# A vendor prefix shared with an installed bundle means the same publisher.
+#
+# zoom.us is installed as us.zoom.xos, so us.zoom.updater and
+# us.zoom.updater.config belong to software that is present. An exact-name
+# lookup misses that entirely.
+orphans::_vendor_is_installed() {
+  local name="$1"
+  local installed_file="$2"
+
+  # Needs vendor + product to be meaningful; "com" alone is not.
+  [[ "$name" == *.*.* ]] || return 1
+
+  local vendor="${name%.*}"
+  while [[ "$vendor" == *.* ]]; do
+    local normalized
+    normalized=$(orphans::_normalize_name "$vendor")
+    if [[ ${#normalized} -ge 5 ]] && grep -qF "$normalized" "$installed_file" 2>/dev/null; then
+      return 0
+    fi
+    vendor="${vendor%.*}"
+  done
+  return 1
+}
+
+# Only propose things that actually look like an application's data.
+#
+# ~/Library/Application Support is shared by apps and by command line tools.
+# go/, pypoetry/, virtualenv/ and iCloud/ are live tool state with no bundle and
+# no app to uninstall, so they can never be the orphan of a removed app.
+orphans::_looks_like_app_data() {
+  local name="$1"
+  local installed_file="$2"
+
+  # A reverse-DNS identifier, e.g. com.openai.chat
+  [[ "$name" == *.*.* ]] && return 0
+
+  # Or a name matching something that was installed at some point.
+  local normalized
+  normalized=$(orphans::_normalize_name "$name")
+  if [[ ${#normalized} -ge 4 ]] && grep -qF "$normalized" "$installed_file" 2>/dev/null; then
+    return 0
+  fi
+
+  return 1
+}
+
+# Everything that must be false before a path is offered for deletion.
+orphans::_is_claimed_by_live_software() {
+  local dir="$1"
+  local name="$2"
+  local installed_file="$3"
+
+  if orphans::_owner_is_running "$name"; then
+    log::verbose "  Keeping ${name}: its process is running"
+    return 0
+  fi
+
+  if orphans::_vendor_is_installed "$name" "$installed_file"; then
+    log::verbose "  Keeping ${name}: same publisher as an installed app"
+    return 0
+  fi
+
+  # Attribute by contents when the top-level name is uninformative.
+  local inner
+  while IFS= read -r inner; do
+    [[ -n "$inner" ]] || continue
+    if orphans::_looks_installed "$inner" "$installed_file"; then
+      log::verbose "  Keeping ${name}: contains data owned by ${inner}"
+      return 0
+    fi
+    if orphans::_owner_is_running "$inner"; then
+      log::verbose "  Keeping ${name}: ${inner} is running"
+      return 0
+    fi
+  done < <(orphans::_inner_owners "$dir")
+
+  return 1
+}
+
 orphans::_record_candidate() {
   local path="$1"
   local name="$2"
@@ -219,6 +337,11 @@ orphans::_scan_application_support() {
     fi
 
     orphans::_looks_installed "$name" "$installed_file" && continue
+    orphans::_looks_like_app_data "$name" "$installed_file" || {
+      log::verbose "  Skipping ${name}: not an application's data"
+      continue
+    }
+    orphans::_is_claimed_by_live_software "$dir" "$name" "$installed_file" && continue
     orphans::_is_recent "$dir" && continue
     orphans::_record_candidate "$dir" "$name"
   done < <(find "$base" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true)
@@ -242,6 +365,7 @@ orphans::_scan_containers() {
     fi
 
     orphans::_looks_installed "$name" "$installed_file" && continue
+    orphans::_is_claimed_by_live_software "$dir" "$name" "$installed_file" && continue
     orphans::_is_recent "$dir" && continue
     orphans::_record_candidate "$dir" "$name"
   done < <(find "$base" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true)
@@ -267,6 +391,16 @@ orphans::_scan_preferences() {
     fi
 
     orphans::_looks_installed "$name" "$installed_file" && continue
+    # Applications write preferences under their bundle identifier. A bare name
+    # like ZoomChat, MiniLauncher or git-credential-manager belongs to a helper,
+    # agent or command line tool — never to an app that can be uninstalled — so
+    # it is held to the same standard as Application Support data.
+    orphans::_looks_like_app_data "$name" "$installed_file" || {
+      log::verbose "  Skipping ${name}: not an application's preference domain"
+      continue
+    }
+    orphans::_owner_is_running "$name" && continue
+    orphans::_vendor_is_installed "$name" "$installed_file" && continue
     orphans::_is_recent "$plist" && continue
     orphans::_record_candidate "$plist" "$name"
   done < <(find "$base" -maxdepth 1 -name "*.plist" -type f 2>/dev/null || true)

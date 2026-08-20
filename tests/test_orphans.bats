@@ -25,7 +25,9 @@ teardown() {
 }
 
 @test "orphans::clean: detects stale orphan candidate in Application Support" {
-  local orphan_dir="$HOME/Library/Application Support/zzzzorphanapp"
+  # Reverse-DNS name: a real app writes its data under its bundle identifier,
+  # and since v0.5.2 only such names are eligible.
+  local orphan_dir="$HOME/Library/Application Support/com.zzzzvendor.OrphanApp"
   mkdir -p "$orphan_dir"
   echo "payload" > "$orphan_dir/data.bin"
   touch -t 202001010101 "$orphan_dir"
@@ -35,7 +37,7 @@ teardown() {
 }
 
 @test "orphans::clean: deletes candidates only when CLEAN_ORPHANS=true" {
-  local orphan_dir="$HOME/Library/Application Support/zzzzdeletecandidate"
+  local orphan_dir="$HOME/Library/Application Support/com.zzzzvendor.DeleteCandidate"
   mkdir -p "$orphan_dir"
   echo "payload" > "$orphan_dir/data.bin"
   touch -t 202001010101 "$orphan_dir"
@@ -118,4 +120,128 @@ teardown() {
   run orphans::_scan_containers "$installed"
   [ "$status" -eq 0 ]
   [[ "$output" != *"group.com.apple.storekit"* ]]
+}
+
+# ── Live-software attribution ─────────────────────────────────────────────────
+# v0.5.1 matched directory names against installed app names, so generic dirs
+# were flagged regardless of who owned them. `firestore` is Arc's local database
+# (firestore/Arc/bcny-arc-server), 40.5 MB, growing during an active session,
+# and it was 97% of the reported orphan total.
+
+_old_stamp() { date -r "$(( $(date +%s) - 200 * 86400 ))" +%Y%m%d%H%M.%S; }
+
+_installed_with() {
+  local f
+  f=$(mktemp "${BATS_TEST_TMPDIR:-/tmp}/installed.XXXXXX")
+  : > "$f"
+  local n
+  for n in "$@"; do orphans::_normalize_name "$n" >> "$f"; done
+  printf '%s\n' "$f"
+}
+
+@test "orphans: a genuine orphan is still detected" {
+  # The check that everything else here must not break.
+  local dir="$HOME/Library/Application Support/com.deadvendor.DeadApp"
+  mkdir -p "$dir"; echo payload > "$dir/data"
+  touch -t "$(_old_stamp)" "$dir"
+
+  local installed
+  installed=$(_installed_with "com.other.LiveApp")
+
+  ORPHAN_CANDIDATES=(); _ORPHAN_TOTAL=0
+  run orphans::_scan_application_support "$installed"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"com.deadvendor.DeadApp"* ]]
+}
+
+@test "orphans: a generic directory is attributed by its contents" {
+  # firestore/Arc/... belongs to Arc, whatever the top-level name says.
+  local dir="$HOME/Library/Application Support/firestore"
+  mkdir -p "$dir/Arc/bcny-arc-server"
+  echo payload > "$dir/Arc/bcny-arc-server/db"
+  touch -t "$(_old_stamp)" "$dir"
+
+  local installed
+  installed=$(_installed_with "Arc")
+
+  ORPHAN_CANDIDATES=(); _ORPHAN_TOTAL=0
+  run orphans::_scan_application_support "$installed"
+  [[ "$output" != *"Orphan candidate"* ]] || [[ "$output" != *"firestore"* ]]
+  [ "$_ORPHAN_TOTAL" -eq 0 ]
+}
+
+@test "orphans: command line tool state is never an app orphan" {
+  # go/, pypoetry/, virtualenv/ and iCloud/ have no bundle and no app to remove.
+  local n
+  for n in go pypoetry virtualenv iCloud; do
+    mkdir -p "$HOME/Library/Application Support/$n"
+    echo x > "$HOME/Library/Application Support/$n/conf"
+    touch -t "$(_old_stamp)" "$HOME/Library/Application Support/$n"
+  done
+
+  local installed
+  installed=$(_installed_with "SomeApp")
+
+  ORPHAN_CANDIDATES=(); _ORPHAN_TOTAL=0
+  run orphans::_scan_application_support "$installed"
+  for n in go pypoetry virtualenv iCloud; do
+    [[ "$output" != *"Orphan candidate: ${n}"* ]]
+  done
+  [ "$_ORPHAN_TOTAL" -eq 0 ]
+}
+
+@test "orphans: a helper sharing a publisher with an installed app is kept" {
+  # zoom.us installs as us.zoom.xos; us.zoom.updater is the same publisher.
+  local installed
+  installed=$(_installed_with "us.zoom.xos")
+
+  run orphans::_vendor_is_installed "us.zoom.updater" "$installed"
+  [ "$status" -eq 0 ]
+  run orphans::_vendor_is_installed "us.zoom.updater.config" "$installed"
+  [ "$status" -eq 0 ]
+
+  # A different publisher must not match.
+  run orphans::_vendor_is_installed "com.unrelated.Thing" "$installed"
+  [ "$status" -ne 0 ]
+}
+
+@test "orphans: a single-label vendor is too weak to grant a pass" {
+  local installed
+  installed=$(_installed_with "com.example.App")
+  # "com" alone must never be treated as a publisher match.
+  run orphans::_vendor_is_installed "com.other" "$installed"
+  [ "$status" -ne 0 ]
+}
+
+@test "orphans: anything whose process is running is kept" {
+  # Use a process certain to exist in the test environment.
+  local self
+  self=$(basename "$(ps -o comm= -p $$ | tr -d ' ')")
+  run orphans::_owner_is_running "$self"
+  [ "$status" -eq 0 ]
+
+  run orphans::_owner_is_running "definitely-not-a-running-process-xyz"
+  [ "$status" -ne 0 ]
+}
+
+@test "orphans: bundle-id preference domains are eligible, bare names are not" {
+  local installed
+  installed=$(_installed_with "com.other.LiveApp")
+
+  run orphans::_looks_like_app_data "com.deadvendor.DeadApp" "$installed"
+  [ "$status" -eq 0 ]
+
+  # Helpers, agents and tools write bare-named plists.
+  for n in ZoomChat MiniLauncher git-credential-manager; do
+    run orphans::_looks_like_app_data "$n" "$installed"
+    [ "$status" -ne 0 ]
+  done
+}
+
+@test "orphans: inner owners are read from a nested layout" {
+  local dir="$HOME/Library/Application Support/generic"
+  mkdir -p "$dir/Vendor/product"
+  run orphans::_inner_owners "$dir"
+  [[ "$output" == *"Vendor"* ]]
+  [[ "$output" == *"product"* ]]
 }
