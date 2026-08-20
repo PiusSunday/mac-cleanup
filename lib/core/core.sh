@@ -7,7 +7,7 @@ export VERBOSE=${VERBOSE:-false}
 export SKIP_CONFIRM=${SKIP_CONFIRM:-false}
 
 # ── Global Constants ───────────────────────────────────────────────────────────
-VERSION="0.4.3"
+VERSION="0.5.0"
 LOG_DIR="$HOME/.mac-cleanup"
 LOG_FILE="$LOG_DIR/cleanup.log"
 
@@ -15,8 +15,8 @@ LOG_FILE="$LOG_DIR/cleanup.log"
 # decimal mismatches in utilities like printf and bc on European machines.
 export LC_NUMERIC=C
 
-export LOG_FILE=${LOG_FILE:-"$HOME/.mac-cleanup/cleanup.log"} # This line is redundant now, but keeping it as per original structure
-export VERSION="$VERSION" # Export the updated version
+export LOG_FILE
+export VERSION
 
 # Cleanup targets (default: all false, set by CLI flags)
 export TARGET_SYSTEM=false
@@ -40,6 +40,15 @@ export DEVOPS_RESET_MODE=${DEVOPS_RESET_MODE:-false}
 export SHOW_OPERATION_LOG=${SHOW_OPERATION_LOG:-false}
 export SHOW_VERSION=${SHOW_VERSION:-false}
 export TARGET_OPTIMIZE=${TARGET_OPTIMIZE:-false}
+
+# Opt-in to purging macOS service caches under ~/Library/Caches/com.apple.*.
+# Off by default: those caches are rebuilt by background daemons within minutes,
+# so removing them inflates the reported total without freeing durable space.
+export INCLUDE_SYSTEM_CACHES=${INCLUDE_SYSTEM_CACHES:-false}
+
+# Opt-in to deleting unusable Xcode simulator runtimes and stale simulator
+# devices. Off by default: runtimes are multi-gigabyte downloads.
+export TARGET_SIMULATORS=${TARGET_SIMULATORS:-false}
 
 # Per-module reporting arrays
 # Each module registers: name, category, scanned bytes, freed bytes, status,

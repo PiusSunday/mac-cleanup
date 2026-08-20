@@ -9,14 +9,12 @@ caches::clean() {
   local freed_before=$TOTAL_FREED
   local dryrun_before=$TOTAL_DRYRUN_BYTES
 
+  # ~/Library/Caches has exactly one owner: caches::_user_caches. The browser,
+  # Spotify, Apple-media and container sweeps that used to re-walk it lived here
+  # too, so every shared directory was measured two or three times and the
+  # preview total could never be reached by a live run.
   caches::_user_caches
   module_scanned=$(( module_scanned + _CACHES_USER_TOTAL ))
-
-  caches::_browsers
-  module_scanned=$(( module_scanned + _CACHES_BROWSERS_TOTAL ))
-
-  caches::_containers
-  module_scanned=$(( module_scanned + _CACHES_CONTAINERS_TOTAL ))
 
   caches::_saved_app_state
   module_scanned=$(( module_scanned + _CACHES_SAVEDSTATE_TOTAL ))
@@ -33,14 +31,8 @@ caches::clean() {
   caches::_shell_caches
   module_scanned=$(( module_scanned + _CACHES_ZSH_TOTAL ))
 
-  caches::_spotify
-  module_scanned=$(( module_scanned + _CACHES_SPOTIFY_TOTAL ))
-
   caches::_podcasts
   module_scanned=$(( module_scanned + _CACHES_PODCASTS_TOTAL ))
-
-  caches::_apple_media
-  module_scanned=$(( module_scanned + _CACHES_APPLEMEDIA_TOTAL ))
 
   caches::_jetbrains
   module_scanned=$(( module_scanned + _CACHES_JETBRAINS_TOTAL ))
@@ -67,17 +59,13 @@ caches::clean() {
 
 # Sub-module scanned totals (set by each helper, read by caches::clean)
 _CACHES_USER_TOTAL=0
-_CACHES_BROWSERS_TOTAL=0
-_CACHES_CONTAINERS_TOTAL=0
 _CACHES_SAVEDSTATE_TOTAL=0
 _CACHES_ANTIGRAVITY_TOTAL=0
 _CACHES_LOGS_TOTAL=0
 _CACHES_APPSUPPORT_TOTAL=0
 _CACHES_ZSH_TOTAL=0
-_CACHES_SPOTIFY_TOTAL=0
 _CACHES_JETBRAINS_TOTAL=0
 _CACHES_PODCASTS_TOTAL=0
-_CACHES_APPLEMEDIA_TOTAL=0
 
 caches::_user_caches() {
   _CACHES_USER_TOTAL=0
@@ -108,11 +96,11 @@ caches::_user_caches() {
     fi
     local size_bytes
     size_bytes=$(utils::get_size_bytes "$cache_dir")
-    total=$(( total + size_bytes ))
     local size_fmt
     size_fmt=$(utils::format_bytes "$size_bytes")
     log::info "  ${ARROW} ${size_fmt}  ${cache_dir}"
     safe_rm "$cache_dir" "User cache: ${app_name}"
+    total=$(( total + SAFE_RM_LAST_BYTES ))
   done < <(find "$path" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true)
 
   _CACHES_USER_TOTAL=$total
@@ -121,6 +109,10 @@ caches::_user_caches() {
   log::info "User caches total: ${total_fmt}"
 }
 
+# ~/Library/Logs itself is SIP-protected, so the directory is never removed.
+# Its per-app subdirectories are ordinary files and are cleaned individually.
+# v0.4.x measured the whole tree and reported it as "found" even though nothing
+# was ever queued, which is why Found never matched Reclaimable.
 caches::_user_logs() {
   _CACHES_LOGS_TOTAL=0
   local path="$HOME/Library/Logs"
@@ -128,17 +120,23 @@ caches::_user_logs() {
     log::info "User logs directory not found — skipping."
     return 0
   fi
-  local size_bytes
-  size_bytes=$(utils::get_size_bytes "$path")
-  _CACHES_LOGS_TOTAL=$size_bytes
-  local size
-  size=$(utils::format_bytes "$size_bytes")
-  log::info "User logs: ${size}"
-  if ! utils::is_deletable "$path"; then
-    log::verbose "Skipping protected: ${path}"
-    return 0
+
+  local total=0
+  local entry
+  while IFS= read -r entry; do
+    [[ -n "$entry" ]] || continue
+    utils::is_deletable "$entry" || continue
+    local size
+    size=$(utils::get_size_bytes "$entry")
+    (( size > 0 )) || continue
+    total=$(( total + size ))
+    safe_rm "$entry" "User log: $(basename "$entry")" "silent"
+  done < <(find "$path" -mindepth 1 -maxdepth 1 2>/dev/null || true)
+
+  _CACHES_LOGS_TOTAL=$total
+  if (( total > 0 )); then
+    log::info "User logs: $(utils::format_bytes "$total")"
   fi
-  safe_rm_contents "$path" "User logs"
 }
 
 caches::_app_support_caches() {
@@ -168,126 +166,93 @@ caches::_app_support_caches() {
 
     local size_bytes
     size_bytes=$(utils::get_size_bytes "$cache_dir")
-    total=$(( total + size_bytes ))
     local size_fmt
     size_fmt=$(utils::format_bytes "$size_bytes")
     log::info "  ${ARROW} ${size_fmt}  ${cache_dir}"
     safe_rm "$cache_dir" "App Support: ${app_name}/$(basename "$cache_dir")"
+    # Count only what safe_rm accepted. The editor-cache sweep in devtools.sh
+    # reaches several of these paths first, and adding the du result here
+    # regardless is what made Found exceed Reclaimable.
+    total=$(( total + SAFE_RM_LAST_BYTES ))
   done < <(find "$base" -mindepth 2 -maxdepth 2 -type d \( -iname "cache" -o -iname "logs" -o -iname "log" -o -iname "tmp" -o -iname "temp" \) 2>/dev/null || true)
   _CACHES_APPSUPPORT_TOTAL=$total
 }
 
-# Check if an application is currently running (by process name).
-# Uses pgrep -x for exact match; falls back to checking launchctl if available.
+# Check if the owner of a cache directory is currently running.
+#
+# Cache directory names are either a plain app name ("Slack") or a bundle id
+# ("com.tinyspeck.slackmacgap"). pgrep matches process names, so a bundle id
+# needs its trailing component tried as well — that is what the daemon or
+# helper binary is usually called.
+#
+# The previous implementation grepped the whole `launchctl list` output for the
+# name, which matched almost every substring and silently skipped real work.
+# Cache directory names whose owning process cannot be derived from the name.
+# Wiping a browser's cache while it runs makes it rewrite the files immediately
+# (so nothing is reclaimed) and can corrupt its on-disk profile.
+CACHE_OWNER_PROCESSES=(
+  "Google|Google Chrome"
+  "Firefox|firefox"
+  "com.microsoft.edgemac|Microsoft Edge"
+  "BraveSoftware|Brave Browser"
+  "company.thebrowser.Browser|Arc"
+  "com.operasoftware.Opera|Opera"
+  "com.vivaldi.Vivaldi|Vivaldi"
+  "com.spotify.client|Spotify"
+  "com.tinyspeck.slackmacgap|Slack"
+  "com.hnc.Discord|Discord"
+  "com.microsoft.VSCode|Code"
+  "com.todesktop.230313mzl4w4u92|Cursor"
+  "Zen|zen"
+)
+
+caches::_cache_owner_process() {
+  local dir_name="$1"
+  local entry key value
+  (( ${#CACHE_OWNER_PROCESSES[@]} > 0 )) || return 1
+  for entry in "${CACHE_OWNER_PROCESSES[@]}"; do
+    key="${entry%%|*}"
+    value="${entry#*|}"
+    if [[ "$dir_name" == "$key" ]]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+  done
+  return 1
+}
+
 caches::_is_app_running() {
   local app_name="$1"
-  # Try exact process name match first
+  [[ -n "$app_name" ]] || return 1
+
+  # Known owners first — the directory name rarely matches the process name.
+  local owner
+  if owner=$(caches::_cache_owner_process "$app_name"); then
+    pgrep -xi "$owner" &>/dev/null && return 0
+  fi
+
   if pgrep -xi "$app_name" &>/dev/null; then
     return 0
   fi
-  # Check if any macOS .app with this name is running via launchctl
+
+  # Bundle-id form: try the last dot-separated component.
+  if [[ "$app_name" == *.* ]]; then
+    local leaf="${app_name##*.}"
+    if [[ -n "$leaf" && ${#leaf} -ge 4 ]] && pgrep -xi "$leaf" &>/dev/null; then
+      return 0
+    fi
+  fi
+
+  # A registered launchd label is an exact match, not a substring.
   if command -v launchctl &>/dev/null; then
-    if launchctl list 2>/dev/null | grep -qi "$app_name"; then
+    if launchctl list 2>/dev/null | awk '{print $3}' | grep -qxF "$app_name"; then
       return 0
     fi
   fi
   return 1
 }
 
-# ── Browser caches ───────────────────────────────────────────────────────────
-caches::_browsers() {
-  _CACHES_BROWSERS_TOTAL=0
-  local total=0
 
-  # Map of: process_name | cache_path | label
-  local -a browser_entries=(
-    "Google Chrome|$HOME/Library/Caches/Google/Chrome|Chrome cache"
-    "Google Chrome|$HOME/Library/Application Support/Google/Chrome/Default/Application Cache|Chrome app cache"
-    "Google Chrome|$HOME/Library/Application Support/Google/Chrome/Default/GPUCache|Chrome GPU cache"
-    "Google Chrome|$HOME/Library/Application Support/Google/GoogleUpdater/crx_cache|GoogleUpdater CRX cache"
-    "Firefox|$HOME/Library/Caches/Firefox|Firefox cache"
-    "Microsoft Edge|$HOME/Library/Caches/com.microsoft.edgemac|Edge cache"
-    "Arc|$HOME/Library/Caches/company.thebrowser.Browser|Arc cache"
-    "Brave Browser|$HOME/Library/Caches/BraveSoftware/Brave-Browser|Brave cache"
-    "Opera|$HOME/Library/Caches/com.operasoftware.Opera|Opera cache"
-    "Vivaldi|$HOME/Library/Caches/com.vivaldi.Vivaldi|Vivaldi cache"
-  )
-
-  for entry in "${browser_entries[@]}"; do
-    IFS='|' read -r process cache_path label <<< "$entry"
-
-    [[ -d "$cache_path" ]] || continue
-
-    # Skip if browser is currently running
-    if pgrep -x "$process" &>/dev/null; then
-      log::verbose "Skipping ${label} — ${process} is running"
-      continue
-    fi
-
-    utils::is_deletable "$cache_path" || continue
-
-    local size
-    size=$(utils::get_size_bytes "$cache_path")
-    if (( size > 0 )); then
-      log::info "  ${label}: $(utils::format_bytes "$size")"
-      safe_rm "$cache_path" "$label"
-      total=$(( total + size ))
-    fi
-  done
-
-  _CACHES_BROWSERS_TOTAL=$total
-  if (( total > 0 )); then
-    log::info "Browser caches: $(utils::format_bytes "$total")"
-  fi
-}
-
-# ── Sandboxed app container caches ───────────────────────────────────────────
-caches::_containers() {
-  _CACHES_CONTAINERS_TOTAL=0
-  local containers_dir="$HOME/Library/Containers"
-  [[ -d "$containers_dir" ]] || return 0
-
-  local total=0
-
-  while IFS= read -r container_dir; do
-    local bundle_id
-    bundle_id=$(basename "$container_dir")
-
-    # Never touch Apple system containers
-    [[ "$bundle_id" == com.apple.* ]] && continue
-
-    local -a candidate_dirs=(
-      "${container_dir}/Data/Library/Caches"
-      "${container_dir}/Data/tmp"
-    )
-
-    local cache_dir
-    for cache_dir in "${candidate_dirs[@]}"; do
-      [[ -d "$cache_dir" ]] || continue
-
-      utils::is_deletable "$cache_dir" || continue
-
-      # Skip if the owning app is currently running
-      if pgrep -xi "$bundle_id" &>/dev/null; then
-        log::verbose "  Skipping container cache (app running): ${bundle_id}"
-        continue
-      fi
-
-      local size
-      size=$(utils::get_size_bytes "$cache_dir")
-      (( size > 0 )) || continue
-
-      log::verbose "  Container cache: ${bundle_id} ($(utils::format_bytes "$size"))"
-      safe_rm "$cache_dir" "Container cache: ${bundle_id}"
-      total=$(( total + size ))
-    done
-  done < <(find "$containers_dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true)
-
-  _CACHES_CONTAINERS_TOTAL=$total
-  if (( total > 0 )); then
-    log::info "Sandboxed app container caches: $(utils::format_bytes "$total")"
-  fi
-}
 
 # ── Saved Application State ──────────────────────────────────────────────────
 caches::_saved_app_state() {
@@ -370,20 +335,6 @@ caches::_shell_caches() {
   fi
 }
 
-# ── Spotify cache ────────────────────────────────────────────────────────────
-caches::_spotify() {
-  _CACHES_SPOTIFY_TOTAL=0
-  local spotify_cache="$HOME/Library/Caches/com.spotify.client"
-  if [[ -d "$spotify_cache" ]]; then
-    local size
-    size=$(utils::get_size_bytes "$spotify_cache")
-    if (( size > 0 )); then
-      _CACHES_SPOTIFY_TOTAL=$size
-      log::info "Spotify cache: $(utils::format_bytes "$size")"
-      safe_rm "$spotify_cache" "Spotify cache"
-    fi
-  fi
-}
 
 # ── JetBrains IDE caches ──────────────────────────────────────────────────────
 caches::_jetbrains() {
@@ -466,25 +417,3 @@ caches::_podcasts() {
   _CACHES_PODCASTS_TOTAL=$total
 }
 
-# ── Apple media streaming caches ─────────────────────────────────────────────
-caches::_apple_media() {
-  _CACHES_APPLEMEDIA_TOTAL=0
-  local total=0
-  local -a media_caches=(
-    "$HOME/Library/Caches/com.apple.Music"
-    "$HOME/Library/Caches/com.apple.TV"
-    "$HOME/Library/Caches/com.apple.podcasts"
-  )
-
-  local p
-  for p in "${media_caches[@]}"; do
-    [[ -d "$p" ]] || continue
-    local size
-    size=$(utils::get_size_bytes "$p")
-    (( size > 0 )) || continue
-    total=$(( total + size ))
-    safe_rm "$p" "Apple media cache: $(basename "$p")"
-  done
-
-  _CACHES_APPLEMEDIA_TOTAL=$total
-}

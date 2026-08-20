@@ -365,13 +365,37 @@ devtools::_gradle_cache() {
 
   local total=0
 
+  # ~/.gradle/caches is not one cache. modules-2/ holds every downloaded
+  # dependency jar and is expensive to refetch; build-cache-*, transforms-*,
+  # journal-* and the versioned jar directories are regenerated build state.
+  # v0.4.x deleted the whole tree, which forced a full re-download of every
+  # dependency on the next build — space reclaimed, hours lost.
   if [[ -d "$path" ]]; then
-    local size_bytes
-    size_bytes=$(utils::get_size_bytes "$path")
-    if (( size_bytes > 0 )); then
-      log::info "Gradle cache: $(utils::format_bytes "$size_bytes")"
-      safe_rm "$path" "Gradle cache"
+    local -a gradle_disposable=()
+    local entry
+    while IFS= read -r entry; do
+      [[ -n "$entry" ]] || continue
+      case "$(basename "$entry")" in
+        build-cache-* | transforms-* | journal-* | jars-* | modules-2/files-2.1/*.lock)
+          gradle_disposable+=("$entry")
+          ;;
+      esac
+    done < <(find "$path" -mindepth 1 -maxdepth 1 2>/dev/null || true)
+
+    local g
+    for g in "${gradle_disposable[@]}"; do
+      local size_bytes
+      size_bytes=$(utils::get_size_bytes "$g")
+      (( size_bytes > 0 )) || continue
+      log::info "Gradle ${ARROW} $(utils::format_bytes "$size_bytes")  $(basename "$g")"
+      safe_rm "$g" "Gradle $(basename "$g")"
       total=$(( total + size_bytes ))
+    done
+
+    local kept
+    kept=$(utils::get_size_bytes "$path/modules-2")
+    if (( kept > 0 )); then
+      log::info "Gradle dependency cache kept: $(utils::format_bytes "$kept") (modules-2)"
     fi
   fi
 
@@ -502,11 +526,24 @@ devtools::_pnpm() {
 
   if [[ "$DRY_RUN" == "true" ]]; then
     log::info "[DRY-RUN] Would run: pnpm store prune"
-  else
-    utils::with_spinner "Running pnpm store prune..." pnpm store prune
+    # `pnpm store prune` drops only packages no project references. Reporting
+    # the whole store as reclaimable — which is what v0.4.x did — overstated
+    # this by the size of every package still in use.
+    _DEV_PNPM_TOTAL=0
+    return 0
   fi
 
-  _DEV_PNPM_TOTAL=$size_before
+  utils::with_spinner "Running pnpm store prune..." pnpm store prune
+
+  local size_after
+  size_after=$(utils::get_size_bytes "$pnpm_path")
+  if (( size_before > size_after )); then
+    _DEV_PNPM_TOTAL=$(( size_before - size_after ))
+    TOTAL_FREED=$(( TOTAL_FREED + _DEV_PNPM_TOTAL ))
+    log::success "  pnpm store pruned ($(utils::format_bytes "$_DEV_PNPM_TOTAL"))"
+  else
+    _DEV_PNPM_TOTAL=0
+  fi
 }
 
 # ── e) Flutter/Dart build artifacts ──────────────────────────────────────────
@@ -567,7 +604,11 @@ devtools::_flutter() {
     if (( pub_size > 0 )); then
       log::info "  Pub cache: $(utils::format_bytes "$pub_size") at ~/.pub-cache"
       log::warn "  Cleaning pub cache forces re-download of all packages on next build."
-      if utils::confirm "Clean pub cache (~/.pub-cache)?"; then
+      if [[ "$DRY_RUN" == "true" ]]; then
+        # utils::confirm now declines during a preview instead of blocking on
+        # stdin, which is what made `--dry-run` hang here waiting for input.
+        log::info "  A live run will ask before removing it; not counted as reclaimable."
+      elif utils::confirm "Clean pub cache (~/.pub-cache)?"; then
         safe_rm "$HOME/.pub-cache" "Flutter pub cache"
         total_bytes=$(( total_bytes + pub_size ))
       fi
@@ -707,7 +748,7 @@ devtools::_vscode() {
     "CachedExtensions"
   )
 
-  for editor in "Code" "Cursor"; do
+  for editor in "Code" "Code - Insiders" "Cursor" "Windsurf" "Zed" "VSCodium" "Antigravity IDE"; do
     local base="$HOME/Library/Application Support/$editor"
     [[ -d "$base" ]] || continue
 

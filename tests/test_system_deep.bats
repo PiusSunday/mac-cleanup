@@ -47,11 +47,28 @@ teardown() {
   [ "$TOTAL_DRYRUN_BYTES" -gt 0 ]
 }
 
-@test "system_deep::_safari_content_cache: dry-run reports and preserves cache" {
+@test "system_deep::_safari_content_cache: protected by default as an OS service cache" {
   local cache_file="$HOME/Library/Caches/com.apple.Safari/fsCachedData/blob.cache"
   echo "cache" > "$cache_file"
 
   DRY_RUN=true
+  INCLUDE_SYSTEM_CACHES=false
+  TOTAL_DRYRUN_BYTES=0
+  _SYSTEM_DEEP_TOTAL=0
+
+  system_deep::_safari_content_cache > /dev/null 2>&1
+  [ -e "$cache_file" ]
+  # ~/Library/Caches/com.apple.* is rebuilt by macOS within minutes, so it is
+  # not counted as reclaimable unless the user opts in.
+  [ "$TOTAL_DRYRUN_BYTES" -eq 0 ]
+}
+
+@test "system_deep::_safari_content_cache: counted when --include-system-caches is set" {
+  local cache_file="$HOME/Library/Caches/com.apple.Safari/fsCachedData/blob.cache"
+  echo "cache" > "$cache_file"
+
+  DRY_RUN=true
+  INCLUDE_SYSTEM_CACHES=true
   TOTAL_DRYRUN_BYTES=0
   _SYSTEM_DEEP_TOTAL=0
 
