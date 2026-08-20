@@ -239,6 +239,7 @@ each one individually. Nothing is ever truncated.
 | `--simulators`        | —     | false   | Delete superseded Xcode simulator runtimes and prune unavailable devices                        |
 | `--include-system-caches` | — | false   | Also purge `~/Library/Caches/com.apple.*` (rebuilt by macOS; off by default)                    |
 | `--purge-stale`       | —     | false   | Delete build artifacts in projects untouched for 90+ days                                        |
+| `--empty-trash`       | —     | false   | Empty the Trash — user data, never implied by `--yes`                                            |
 | `--stale-days`        | —     | 90      | Days of inactivity before a project's build artifacts count as stale                             |
 | `--show-log`          | —     | false   | Print operation log from `~/.mac-cleanup/operations.log` and exit                               |
 | `--version`           | `-V`  | false   | Print the current mac-cleanup version and exit                                                  |
@@ -295,6 +296,24 @@ Modules overlap on purpose — the user-cache sweep, the editor-cache sweep and 
 sweep all reach some of the same directories. A per-run claim ledger accounts for each path
 exactly once, so `--dry-run` reports the number a live run actually frees rather than a total
 inflated by every module that walked the same bytes.
+
+### Recoverable user data needs its own flag
+
+`--yes` means "do not ask me about cleanup", not "destroy recoverable data". Two things are
+therefore never reachable through it:
+
+- **The Trash** needs `--empty-trash`, and confirms even then. Files there were deleted but not
+  committed to being lost — macOS keeps them recoverable on purpose.
+- **`~/.pub-cache`** is skipped under `--yes`; removing it re-downloads every Flutter package, so
+  it only happens on an interactive confirmation.
+
+Both are reported as decisions instead, with the command that would act on them.
+
+### Targets mean what they say
+
+`mac-cleanup --docker` cleans Docker. Until v0.5.2 the system scan and orphan pass ran above the
+target gating, so any target also swept crash reports, `.DS_Store`, npm caches and emptied the
+Trash.
 
 ### Value over vanity
 

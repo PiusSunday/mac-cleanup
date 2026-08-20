@@ -185,9 +185,31 @@ system::_trash() {
     log::info "Trash: ${trash_count} items ($(utils::format_bytes "$trash_size"))"
   fi
 
+  # The Trash is user data: files the user chose to delete but has not committed
+  # to losing, which macOS keeps recoverable on purpose. Emptying it is not part
+  # of a cache sweep, and --yes must not be able to trigger it — that flag means
+  # "do not ask me about cleanup", not "destroy recoverable data".
+  if [[ "${EMPTY_TRASH:-false}" != "true" ]]; then
+    log::info "Trash: ${trash_count} items ($(utils::format_bytes "$trash_size")) — left alone"
+    if (( trash_size > 0 )); then
+      utils::register_action \
+        "${trash_count} items in the Trash" \
+        "$trash_size" \
+        "mac-cleanup --empty-trash"
+    fi
+    return
+  fi
+
   if [[ "$DRY_RUN" == "true" ]]; then
     TOTAL_DRYRUN_BYTES=$(( TOTAL_DRYRUN_BYTES + trash_size ))
     log::info "[DRY-RUN] Would empty Trash (${trash_count} items)"
+    return
+  fi
+
+  # Even with the flag, deleting recoverable user data is confirmed explicitly.
+  if ! utils::confirm "Permanently empty the Trash (${trash_count} items, $(utils::format_bytes "$trash_size"))?"; then
+    log::info "Trash: left alone."
+    _SYS_TRASH_TOTAL=0
     return
   fi
 

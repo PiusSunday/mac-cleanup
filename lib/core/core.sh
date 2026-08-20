@@ -7,7 +7,7 @@ export VERBOSE=${VERBOSE:-false}
 export SKIP_CONFIRM=${SKIP_CONFIRM:-false}
 
 # ── Global Constants ───────────────────────────────────────────────────────────
-VERSION="0.5.1"
+VERSION="0.5.2"
 LOG_DIR="$HOME/.mac-cleanup"
 LOG_FILE="$LOG_DIR/cleanup.log"
 
@@ -54,6 +54,12 @@ export TARGET_SIMULATORS=${TARGET_SIMULATORS:-false}
 # STALE_PROJECT_DAYS. Off by default: reclaiming these costs a rebuild.
 export PURGE_STALE=${PURGE_STALE:-false}
 export STALE_PROJECT_DAYS=${STALE_PROJECT_DAYS:-90}
+
+# The Trash holds files the user chose to delete but has not committed to
+# losing — macOS keeps them precisely so they can be recovered. --yes means
+# "do not ask me about cleanup", not "destroy recoverable user data", so
+# emptying it requires its own flag.
+export EMPTY_TRASH=${EMPTY_TRASH:-false}
 
 # Per-module reporting arrays
 # Each module registers: name, category, scanned bytes, freed bytes, status,

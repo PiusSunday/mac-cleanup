@@ -204,3 +204,95 @@ setup() {
 
   [ "$_SYS_VARFOLDERS_TOTAL" -gt 0 ]
 }
+
+# ── Trash gating ──────────────────────────────────────────────────────────────
+# The Trash holds files the user chose to delete but has not committed to
+# losing. Until v0.5.2 system::_trash emptied it as part of an ordinary cache
+# sweep — and because system::clean ran above the target gating, even
+# `mac-cleanup --docker` did it.
+
+# Report 125 items totalling 2 GB without touching the real Finder.
+_stub_full_trash() {
+  _osascript_timed() {
+    case "$*" in
+      *"count items in trash"*) echo 125 ;;
+      *"get size of trash"*)    echo 2147483648 ;;
+      *"empty trash"*)          _TRASH_EMPTIED=true ;;
+    esac
+    return 0
+  }
+}
+
+@test "system: the Trash is left alone without --empty-trash" {
+  _stub_full_trash
+  EMPTY_TRASH=false
+  DRY_RUN=true
+  TOTAL_DRYRUN_BYTES=0
+  ACTION_LABELS=(); ACTION_BYTES=(); ACTION_COMMANDS=()
+
+  run system::_trash
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"left alone"* ]]
+  [[ "$output" != *"Would empty"* ]]
+
+  system::_trash >/dev/null 2>&1
+  # Not counted toward reclaimable, and offered as a decision instead.
+  [ "$TOTAL_DRYRUN_BYTES" -eq 0 ]
+  [ "${#ACTION_LABELS[@]}" -eq 1 ]
+  [[ "${ACTION_COMMANDS[0]}" == *"--empty-trash"* ]]
+}
+
+@test "system: --yes alone must never empty the Trash" {
+  # --yes means "do not ask me about cleanup", not "destroy recoverable data".
+  _stub_full_trash
+  EMPTY_TRASH=false
+  SKIP_CONFIRM=true
+  DRY_RUN=false
+  _TRASH_EMPTIED=false
+
+  run system::_trash
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"left alone"* ]]
+  [ "$_TRASH_EMPTIED" != "true" ]
+}
+
+@test "system: --empty-trash queues it in a preview" {
+  _stub_full_trash
+  EMPTY_TRASH=true
+  DRY_RUN=true
+  TOTAL_DRYRUN_BYTES=0
+
+  run system::_trash
+  [[ "$output" == *"Would empty Trash"* ]]
+
+  system::_trash >/dev/null 2>&1
+  [ "$TOTAL_DRYRUN_BYTES" -gt 0 ]
+}
+
+@test "system: --empty-trash still confirms before a live delete" {
+  _stub_full_trash
+  EMPTY_TRASH=true
+  DRY_RUN=false
+  SKIP_CONFIRM=false
+  _TRASH_EMPTIED=false
+  # Non-interactive: utils::confirm declines rather than hanging.
+  run system::_trash
+  [ "$status" -eq 0 ]
+  [ "$_TRASH_EMPTIED" != "true" ]
+}
+
+@test "system: an empty Trash says so and offers nothing" {
+  _osascript_timed() {
+    case "$*" in
+      *"count items in trash"*) echo 0 ;;
+      *) echo 0 ;;
+    esac
+    return 0
+  }
+  EMPTY_TRASH=false
+  ACTION_LABELS=(); ACTION_BYTES=(); ACTION_COMMANDS=()
+
+  run system::_trash
+  [[ "$output" == *"empty"* ]]
+  [ "${#ACTION_LABELS[@]}" -eq 0 ]
+}

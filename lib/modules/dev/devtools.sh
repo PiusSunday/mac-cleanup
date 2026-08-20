@@ -692,6 +692,13 @@ devtools::_flutter() {
         # utils::confirm now declines during a preview instead of blocking on
         # stdin, which is what made `--dry-run` hang here waiting for input.
         log::info "  A live run will ask before removing it; not counted as reclaimable."
+        utils::register_action \
+          "Flutter pub cache (every package re-downloads on next build)" \
+          "$pub_size" \
+          "mac-cleanup --devtools  (asks before removing)"
+      elif [[ "$SKIP_CONFIRM" == "true" ]]; then
+        # --yes must not silently trigger a full re-download of every package.
+        log::warn "  Skipped under --yes; removing it needs an interactive confirmation."
       elif utils::confirm "Clean pub cache (~/.pub-cache)?"; then
         safe_rm "$HOME/.pub-cache" "Flutter pub cache"
         total_bytes=$(( total_bytes + pub_size ))
