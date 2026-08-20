@@ -67,6 +67,7 @@ ${BOLD}TARGETS:${RESET}
   --snapshots, -s    Delete local Time Machine snapshots
   --simulators       Delete unusable Xcode simulator runtimes and stale devices
   --purge-stale      Delete build artifacts in projects untouched for 90+ days
+  --empty-trash      Empty the Trash (user data — never implied by --yes)
   --caches, -c       Clear ~/Library/Caches, Zsh, Spotify, JetBrains, and app caches
   --mail, -m         Clean old Mail downloads and recent-item metadata
   --brew, -b         Run brew cleanup and autoremove
@@ -221,6 +222,11 @@ parse_flags() {
       --purge-stale)
         PURGE_STALE=true
         TARGET_DEVTOOLS=true
+        target_specified=true
+        ;;
+      --empty-trash)
+        EMPTY_TRASH=true
+        TARGET_SYSTEM=true
         target_specified=true
         ;;
       --stale-days)
@@ -569,11 +575,16 @@ main() {
     fi
   }
 
-  # ── System (always runs first) ──
-  log::category "System"
-  run_module "System" system::clean
-  [[ "$TARGET_SYSTEM_DEEP" == "true" ]] && run_module "System Deep" system_deep::clean
-  run_module "Orphans" orphans::clean
+  # ── System ──
+  # These used to run above the gating, so `mac-cleanup --docker` also swept
+  # crash reports, .DS_Store, npm caches and emptied the Trash. A target flag
+  # now means what it says.
+  if [[ "$TARGET_SYSTEM" == "true" ]] || [[ "$TARGET_SYSTEM_DEEP" == "true" ]]; then
+    log::category "System"
+    [[ "$TARGET_SYSTEM" == "true" ]] && run_module "System" system::clean
+    [[ "$TARGET_SYSTEM_DEEP" == "true" ]] && run_module "System Deep" system_deep::clean
+    [[ "$TARGET_SYSTEM" == "true" ]] && run_module "Orphans" orphans::clean
+  fi
 
   # ── Developer Tools ──
   if [[ "$TARGET_XCODE" == "true" ]] || [[ "$TARGET_DOCKER" == "true" ]] || [[ "$TARGET_DEVTOOLS" == "true" ]]; then

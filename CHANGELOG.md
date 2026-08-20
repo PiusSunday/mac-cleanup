@@ -7,6 +7,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.5.2] - 2026-08-20
+
+Three data-loss defects. v0.5.1 made the report trustworthy; these made the deletion targets
+wrong, which is the more dangerous half.
+
+### Fixed
+
+- **CRITICAL — `--devtools` deleted live editor state.** Editor workspaceStorage directories were
+  selected with `find -mtime +30` alone, which answers "not opened recently", not "no longer
+  needed". `--devtools` runs as part of `--all` with no opt-in and no prompt. On the development
+  machine the rule flagged 27 workspaces whose project folders still existed — 862 MB, including
+  the workspace for the repository open at the time — against 3 that were genuinely dead. Each
+  directory now has its `workspace.json` parsed, the `file://` URI percent-decoded, and is removed
+  only if the project folder is provably gone. Anything undatable — no json, unparseable, or a
+  remote URI — is kept, and mtime survives only as an additional gate.
+- **CRITICAL — `--clean-orphans` would have deleted a running browser's database.** Ownership was
+  decided by matching directory names against installed app names, so any directory whose name did
+  not look like an app was fair game. `firestore` is Arc's local database
+  (`firestore/Arc/bcny-arc-server`) at 40.5 MB — 97% of the reported orphan total — and it was
+  growing while Arc ran. Ownership is now attributed by directory *contents*, anything whose owning
+  process is running is kept, a shared publisher counts as installed (`zoom.us` ships as
+  `us.zoom.xos`, so `us.zoom.updater` is covered), and entries must look like an application's data
+  at all, which excludes toolchain state such as `go`, `pypoetry`, `virtualenv` and `iCloud`. The
+  reported total on this machine drops from 41.5 MB to nothing — all of it was false positives —
+  while a synthetic `com.deadvendor.DeadApp` fixture confirms genuine orphans are still found.
+- **CRITICAL — every target ran the system scan.** `system::clean` and `orphans::clean` were called
+  above the target gating, so `mac-cleanup --docker` swept crash reports, `.DS_Store` and npm
+  caches, and emptied the Trash. Both are now gated behind `--system`. `--docker --dry-run` went
+  from 55 s to 2 s as a side effect.
+
+### Changed
+
+- **The Trash needs `--empty-trash`**, and confirms even with the flag. It holds files the user
+  chose to delete but has not committed to losing; `--yes` means "do not ask me about cleanup", not
+  "destroy recoverable user data". Reported as a decision otherwise.
+- **`~/.pub-cache` is skipped under `--yes`** for the same reason — removing it re-downloads every
+  Flutter package, so it requires an interactive confirmation.
+
 ## [v0.5.1] - 2026-08-20
 
 Accuracy follow-up. A real cleanup run against the v0.5.0 report showed its Docker figures were
