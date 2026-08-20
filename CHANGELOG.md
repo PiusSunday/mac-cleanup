@@ -7,6 +7,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.5.1] - 2026-08-20
+
+Accuracy follow-up. A real cleanup run against the v0.5.0 report showed its Docker figures were
+inflated roughly 4×, and that the tool was leaving a third of the simulator win on the table.
+
+### Fixed
+
+- **CRITICAL — Docker sizes were inflated by shared layers.** The report advertised 14.9 GB of
+  unused images; deleting all 17 reclaimed 3.56 GB. `docker images --format '{{.Size}}'` reports
+  each image's *full* size including shared base layers, so summing it counts every shared layer
+  once per image that references it — with a Supabase stack sharing Postgres and Debian bases, a
+  dozen times over. `docker system df`'s own `Reclaimable` column has the same basis, so the
+  "honest Docker numbers" change in v0.5.0 did not fix this.
+
+  Sizes now come from `docker system df -v`'s `UniqueSize`, which excludes layers shared with
+  images you keep, and images are classified unused via Docker's own `Containers` reference count
+  rather than by matching container ancestry — which also fixes images being called unused because
+  a running container referenced them under a different tag. Reproduced end to end with three
+  throwaway images sharing a 64 MB base: the old code reported 284.4 MB, the new code reports
+  28.3 MB, and `docker rmi` actually freed 91.6 MB. The figure is now a floor rather than a ceiling,
+  and is labelled "frees at least".
+- **Simulator devices orphaned by runtime deletion were never reclaimed.** Removing a superseded
+  runtime orphans every device bound to it — 22 devices and ~9.4 GB on the development machine,
+  more than a third of the total simulator win. `simctl delete unavailable` ran once before any
+  runtime was deleted and again immediately after; since deletion is asynchronous, neither call
+  ever found an orphaned device. Device pruning now has a single owner, waits (bounded) for the
+  runtimes to finish unmounting, measures what it reclaimed, and the report advertises runtimes and
+  their dependent devices as one combined figure.
+- **The developer-artifact scan reported `0 B` on every run.** It looked for `node_modules` with no
+  nearby `package.json`, a condition that essentially never holds, so it walked `$HOME` for ~30 s
+  and found nothing. Replaced with staleness: build artifacts (`node_modules`, `target`, `build`,
+  `dist`, `.next`, `.nuxt`, `.dart_tool`, `.gradle`) in projects untouched for 90+ days, anchored on
+  the nearest real project root so a Flutter app's `android/.gradle` is dated by its `pubspec.yaml`
+  rather than reported as untouched since the epoch. Anything that cannot be dated is skipped rather
+  than guessed at. Deletion is opt-in behind `--purge-stale`; `--stale-days N` tunes the threshold.
+- **`install.sh` printed an empty version** — it read `lib/core.sh`, a path that moved to
+  `lib/core/core.sh` in the v0.4.0 refactor.
+
+### Added
+
+- `--purge-stale` and `--stale-days N` for dormant-project build artifacts.
+- Live runs now print the projection alongside the measured free-space delta and flag a material
+  shortfall, so an estimate that drifts is visible rather than silent — which is how the Docker
+  over-reporting went unnoticed in the first place.
+- 19 tests covering image-size accounting, device orphaning, the bounded runtime wait, project-root
+  anchoring, and the projection-drift warning.
+
 ## [v0.5.0] - 2026-08-20
 
 A correctness and safety release. Every deletion now routes through a single policy, the dry-run

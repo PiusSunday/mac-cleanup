@@ -70,17 +70,6 @@ devtools::_build_exclude_args() {
   printf '%s\0' "${tmp[@]}"
 }
 
-# Check if a node_modules has a nearby package.json (parent or grandparent)
-devtools::_has_nearby_package_json() {
-  local dir="$1"
-  local parent
-  parent="$(dirname "$dir")"
-  local grandparent
-  grandparent="$(dirname "$parent")"
-  [[ -f "$parent/package.json" ]] || \
-  [[ -f "$grandparent/package.json" ]]
-}
-
 # Public entry point
 devtools::clean() {
   log::section "Developer Artifacts"
@@ -161,83 +150,184 @@ _DEV_ANDROID_TOTAL=0
 _DEV_VSCODE_TOTAL=0
 
 # ── a) node_modules ──────────────────────────────────────────────────────────
+# ── a) Stale project build artifacts ─────────────────────────────────────────
+# Until v0.5.1 this scanned for node_modules with no nearby package.json and
+# deleted those. A node_modules directory sits next to its package.json by
+# definition, so the condition essentially never held: on the development
+# machine the scan walked $HOME for ~30 seconds and reported
+# "7 found (0 orphaned), total 0 B" every time.
+#
+# Staleness is the question worth asking. Build artifacts in a project nobody
+# has touched for months are reclaimable and often large; the same artifacts in
+# an active project are not. Deletion stays behind --purge-stale, matching how
+# orphans and simulator runtimes are handled.
+PROJECT_ARTIFACT_DIRS=(
+  "node_modules"
+  "target"
+  "build"
+  "dist"
+  ".next"
+  ".nuxt"
+  ".dart_tool"
+  ".gradle"
+)
+
+# Markers that identify the root of a real project.
+PROJECT_ROOT_MARKERS=(
+  "package.json" "pubspec.yaml" "Cargo.toml" "go.mod" "pyproject.toml"
+  "setup.py" "Gemfile" "build.gradle" "build.gradle.kts" "pom.xml"
+  "composer.json" "Package.swift" ".git"
+)
+
+# An artifact's parent directory is not always the project root: a Flutter app's
+# android/.gradle sits two levels below the pubspec.yaml that dates the project.
+# Judging staleness from the wrong directory is how the first cut of this scan
+# reported build artifacts as "untouched 20685d" — 56 years, i.e. no source file
+# was found and the mtime fell back to the epoch.
+devtools::_project_root() {
+  local dir="$1"
+  local depth=0
+  local marker
+
+  while (( depth < 4 )) && [[ "$dir" != "/" && "$dir" != "$HOME" ]]; do
+    for marker in "${PROJECT_ROOT_MARKERS[@]}"; do
+      if [[ -e "$dir/$marker" ]]; then
+        printf '%s\n' "$dir"
+        return 0
+      fi
+    done
+    dir="$(dirname "$dir")"
+    (( depth++ )) || true
+  done
+
+  return 1
+}
+
+# Files whose mtime represents real work, as opposed to build output.
+devtools::_project_last_touched() {
+  local project="$1"
+  local newest=0
+  local f mtime
+
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    mtime=$(stat -f%m "$f" 2>/dev/null || echo 0)
+    (( mtime > newest )) && newest=$mtime
+  done < <(
+    find "$project" -maxdepth 2 -type f \
+      \( -name "*.json" -o -name "*.toml" -o -name "*.yaml" -o -name "*.yml" \
+         -o -name "*.lock" -o -name "*.md" -o -name "*.ts" -o -name "*.js" \
+         -o -name "*.py" -o -name "*.rs" -o -name "*.go" -o -name "*.dart" \
+         -o -name "*.swift" -o -name "*.rb" \) \
+      -not -path "*/node_modules/*" -not -path "*/target/*" \
+      -not -path "*/build/*" -not -path "*/dist/*" 2>/dev/null | head -200
+  )
+
+  # A project whose git HEAD moved recently is active even if no file changed.
+  if [[ -d "$project/.git" ]]; then
+    mtime=$(stat -f%m "$project/.git" 2>/dev/null || echo 0)
+    (( mtime > newest )) && newest=$mtime
+  fi
+
+  printf '%s\n' "$newest"
+}
+
 devtools::_node_modules() {
   _DEV_NODE_TOTAL=0
-  log::info "Scanning for node_modules directories..."
+  log::info "Scanning for stale project build artifacts (untouched ${STALE_PROJECT_DAYS}+ days)..."
 
-  local total_count=0
-  local orphan_count=0
-  local total_bytes=0
-
-  # Build exclusion args
   local exclude_args=()
   while IFS= read -r -d '' arg; do
     exclude_args+=("$arg")
   done < <(devtools::_build_exclude_args DEVTOOLS_EXCLUDE_PATHS)
 
-  local _seen_node_modules="|"
+  local now cutoff
+  now=$(date +%s)
+  cutoff=$(( now - STALE_PROJECT_DAYS * 86400 ))
+
+  local seen="|"
+  local stale_count=0
+  local active_count=0
+  local total_bytes=0
+  local scan_dir artifact project canonical
 
   for scan_dir in "${DEVTOOLS_SCAN_DIRS[@]}"; do
     [[ -d "$scan_dir" ]] || continue
 
-    while IFS= read -r nm_dir; do
-      [[ -n "$nm_dir" ]] || continue
-      
-      local canonical
-      canonical="$(cd "$nm_dir" 2>/dev/null && pwd -P)" || continue
-      if [[ "$_seen_node_modules" == *"|$canonical|"* ]]; then
+    local name_args=()
+    local first=true
+    local d
+    for d in "${PROJECT_ARTIFACT_DIRS[@]}"; do
+      if [[ "$first" == "true" ]]; then
+        name_args+=(-name "$d")
+        first=false
+      else
+        name_args+=(-o -name "$d")
+      fi
+    done
+
+    while IFS= read -r artifact; do
+      [[ -n "$artifact" ]] || continue
+
+      canonical="$(cd "$artifact" 2>/dev/null && pwd -P)" || continue
+      [[ "$seen" == *"|$canonical|"* ]] && continue
+      seen="${seen}${canonical}|"
+
+      # Anchor on the nearest ancestor that actually looks like a project.
+      project="$(devtools::_project_root "$(dirname "$artifact")")" || {
+        log::verbose "  No project root above ${artifact} — skipping."
+        continue
+      }
+
+      local touched
+      touched=$(devtools::_project_last_touched "$project")
+      if (( touched <= 0 )); then
+        # Nothing datable. Refusing to guess beats reporting a 56-year age.
+        log::verbose "  Cannot date ${project} — skipping."
         continue
       fi
-      _seen_node_modules="${_seen_node_modules}${canonical}|"
-      local size_bytes
-      size_bytes=$(utils::get_size_bytes "$nm_dir")
-      (( total_count++ )) || true
-
-      local size_fmt
-      size_fmt=$(utils::format_bytes "$size_bytes")
-
-      if ! devtools::_has_nearby_package_json "$nm_dir"; then
-        # Orphaned — no nearby package.json
-        (( orphan_count++ )) || true
-        total_bytes=$(( total_bytes + size_bytes ))
-        log::warn "  Orphaned: ${nm_dir} (${size_fmt})"
-
-        # Extra safety: prompt per-directory if >500 MB even with --yes
-        if (( size_bytes > 524288000 )); then
-          if [[ "$DRY_RUN" != "true" ]]; then
-            printf '%s%s  This directory is %s — confirm deletion [y/N]: %s' \
-              "${YELLOW}" "${WARN}" "$size_fmt" "${RESET}"
-            local response=""
-            if [[ -t 0 ]] || [[ -t 1 ]]; then
-              if [[ -r /dev/tty ]]; then
-                read -r response < /dev/tty
-              else
-                read -r response
-              fi
-            else
-              log::warn "  Non-interactive shell; skipping deletion of ${nm_dir} (>500 MB)."
-              response="n"
-            fi
-            if [[ ! "$response" =~ ^[Yy]$ ]]; then
-              log::info "  Skipped: ${nm_dir}"
-              continue
-            fi
-          fi
-        fi
-
-        safe_rm "$nm_dir" "orphaned node_modules"
-      else
-        log::verbose "  Active: ${nm_dir} (${size_fmt})"
+      if (( touched > cutoff )); then
+        (( active_count++ )) || true
+        log::verbose "  Active: ${project}"
+        continue
       fi
-    done < <(find "$scan_dir" -maxdepth 6 "${exclude_args[@]}" -name "node_modules" -type d -prune 2>/dev/null || true)
+
+      local size_bytes
+      size_bytes=$(utils::get_size_bytes "$artifact")
+      (( size_bytes > 0 )) || continue
+
+      (( stale_count++ )) || true
+      total_bytes=$(( total_bytes + size_bytes ))
+
+      local age_days=$(( (now - touched) / 86400 ))
+      # Relative to home: eleven "android/.gradle" rows are indistinguishable,
+      # and the project they belong to is the thing the user recognises.
+      local label="${artifact/#$HOME\//}"
+      if [[ "$PURGE_STALE" == "true" ]]; then
+        safe_rm "$artifact" "stale build artifact: ${label} (${age_days}d)"
+      else
+        log::item "$size_bytes" "${label}  ${DIM}(untouched ${age_days}d)${RESET}"
+      fi
+    done < <(find "$scan_dir" -maxdepth 6 "${exclude_args[@]}" \( "${name_args[@]}" \) -type d -prune 2>/dev/null || true)
   done
 
-  _DEV_NODE_TOTAL=$total_bytes
-
-  if (( total_count > 0 )); then
-    log::info "node_modules: ${total_count} found (${orphan_count} orphaned), total $(utils::format_bytes "$total_bytes")"
+  if [[ "$PURGE_STALE" == "true" ]]; then
+    _DEV_NODE_TOTAL=$total_bytes
   else
-    log::info "node_modules: none found."
+    # Report-only: these bytes are not part of this run's reclaimable total.
+    _DEV_NODE_TOTAL=0
+    if (( stale_count > 0 )); then
+      utils::register_action \
+        "${stale_count} build artifacts in projects untouched for ${STALE_PROJECT_DAYS}+ days" \
+        "$total_bytes" \
+        "mac-cleanup --purge-stale"
+    fi
+  fi
+
+  if (( stale_count > 0 )); then
+    log::info "Stale artifacts: ${stale_count} in inactive projects ($(utils::format_bytes "$total_bytes")); ${active_count} active projects untouched"
+  else
+    log::info "Stale artifacts: none — all ${active_count} projects are active."
   fi
 }
 

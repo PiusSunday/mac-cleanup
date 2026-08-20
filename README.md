@@ -34,7 +34,8 @@ Macs aren't designed to naturally tidy up after developers. Whether you're build
 | `--xcode`        | Xcode         | DerivedData, Archives (90d+), iOS DeviceSupport, Simulators, CoreSimulator logs                                                | 10–90 GB        |
 | `--simulators`   | Xcode         | Superseded simulator runtimes (keeps the newest per platform) and unavailable simulator devices                                | 8–40 GB         |
 | `--docker`       | Docker        | Precision cleanup of stopped containers, dangling images, dangling volumes, build cache                                        | 5–30 GB         |
-| `--devtools`     | Dev Artifacts | `node_modules` (orphaned), Rust `target/`, Python `__pycache__`, Flutter, Gradle, Ruby caches                                  | 5–60 GB         |
+| `--devtools`     | Dev Artifacts | Rust `target/`, Python `__pycache__`, Flutter, Gradle, Ruby, editor caches; reports stale project artifacts | 5–60 GB         |
+| `--purge-stale`  | Dev Artifacts | `node_modules`, `target`, `build`, `dist`, `.next`, `.dart_tool` in projects untouched 90+ days | 1–50 GB         |
 | `--snapshots`    | Snapshots     | Local Time Machine snapshots & stale `.inProgress` backups                                                                     | 5–20 GB         |
 | `--caches`       | Caches        | ~/Library/Caches, Application Support caches/logs, Saved App State, Zsh, JetBrains                                             | 2–15 GB         |
 | `--mail`         | Mail          | Old Mail Downloads attachments and recent-item metadata                                                                        | 0.5–10 GB       |
@@ -201,6 +202,11 @@ Modules are ranked by what they can reclaim, largest first, so the biggest win i
 always the top row. `ITEMS` is how many paths the module queued — a module that
 cleans through its own CLI, like Homebrew, shows `—` rather than a misleading `0`.
 
+Sizes are floors, not ceilings. Docker images are measured by their *unique* size — the space that
+actually comes back — because an image's headline size includes base layers shared with images you
+keep. Summing those headline sizes is what made an earlier version advertise 14.9 GB against
+3.56 GB actually freed.
+
 **NEEDS YOUR DECISION** is the part worth reading. It collects everything the tool
 found but will not remove on its own, each with the command that would remove it.
 On the machine above that is 38.5 GB — far more than the 1.3 GB of automatic
@@ -232,6 +238,8 @@ each one individually. Nothing is ever truncated.
 | `--include-ml-models` | —     | false   | Include `.cache/huggingface` and `.ollama/models` in DevOps reset                               |
 | `--simulators`        | —     | false   | Delete superseded Xcode simulator runtimes and prune unavailable devices                        |
 | `--include-system-caches` | — | false   | Also purge `~/Library/Caches/com.apple.*` (rebuilt by macOS; off by default)                    |
+| `--purge-stale`       | —     | false   | Delete build artifacts in projects untouched for 90+ days                                        |
+| `--stale-days`        | —     | 90      | Days of inactivity before a project's build artifacts count as stale                             |
 | `--show-log`          | —     | false   | Print operation log from `~/.mac-cleanup/operations.log` and exit                               |
 | `--version`           | `-V`  | false   | Print the current mac-cleanup version and exit                                                  |
 | `--dry-run`           | `-n`  | —       | Preview only — no deletions (implicitly true when run without any target flags)                 |
