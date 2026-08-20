@@ -55,9 +55,6 @@ xcode::_derived_data() {
   local size_bytes
   size_bytes=$(utils::get_size_bytes "$path")
   MODULE_XCODE_SCANNED=$(( MODULE_XCODE_SCANNED + size_bytes ))
-  local size
-  size=$(utils::format_bytes "$size_bytes")
-  log::info "DerivedData: ${size}"
   safe_rm "$path" "Xcode DerivedData"
 }
 
@@ -102,9 +99,6 @@ xcode::_device_support() {
   local size_bytes
   size_bytes=$(utils::get_size_bytes "$path")
   MODULE_XCODE_SCANNED=$(( MODULE_XCODE_SCANNED + size_bytes ))
-  local size
-  size=$(utils::format_bytes "$size_bytes")
-  log::info "iOS DeviceSupport: ${size}"
   safe_rm "$path" "Xcode DeviceSupport"
 }
 
@@ -117,9 +111,6 @@ xcode::_simulator_caches() {
   local size_bytes
   size_bytes=$(utils::get_size_bytes "$path")
   MODULE_XCODE_SCANNED=$(( MODULE_XCODE_SCANNED + size_bytes ))
-  local size
-  size=$(utils::format_bytes "$size_bytes")
-  log::info "Simulator caches: ${size}"
   safe_rm "$path" "CoreSimulator caches"
 }
 
@@ -195,6 +186,7 @@ xcode::_simulator_runtimes() {
   local line id state bytes version platform
   local reclaimable=0
   local superseded=0
+  local superseded_bytes=0
 
   while IFS='|' read -r id state bytes version platform; do
     [[ -n "$id" ]] || continue
@@ -217,6 +209,7 @@ xcode::_simulator_runtimes() {
     fi
 
     (( superseded++ )) || true
+    superseded_bytes=$(( superseded_bytes + bytes ))
     log::info "  Superseded runtime: ${platform} ${version} ($(utils::format_bytes "$bytes"))"
 
     if [[ "$TARGET_SIMULATORS" != "true" ]]; then
@@ -239,7 +232,11 @@ xcode::_simulator_runtimes() {
   done <<< "$runtimes"
 
   if (( superseded > 0 )) && [[ "$TARGET_SIMULATORS" != "true" ]]; then
-    log::warn "  ${superseded} superseded runtime(s) found. Run with --simulators to reclaim them."
+    log::warn "  ${superseded} superseded runtime(s) found — not removed without --simulators."
+    utils::register_action \
+      "${superseded} superseded Xcode simulator runtimes" \
+      "$superseded_bytes" \
+      "mac-cleanup --simulators"
   fi
 }
 

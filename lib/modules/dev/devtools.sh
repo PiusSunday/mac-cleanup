@@ -287,9 +287,6 @@ devtools::_rust_targets() {
       total_bytes=$(( total_bytes + size_bytes ))
       (( total_count++ )) || true
 
-      local size_fmt
-      size_fmt=$(utils::format_bytes "$size_bytes")
-      log::info "  ${ARROW} ${size_fmt}  ${parent_dir}"
 
       if [[ "$DRY_RUN" == "true" ]]; then
         log::info "  [DRY-RUN] Would run: cargo clean  (in ${parent_dir})"
@@ -387,7 +384,6 @@ devtools::_gradle_cache() {
       local size_bytes
       size_bytes=$(utils::get_size_bytes "$g")
       (( size_bytes > 0 )) || continue
-      log::info "Gradle ${ARROW} $(utils::format_bytes "$size_bytes")  $(basename "$g")"
       safe_rm "$g" "Gradle $(basename "$g")"
       total=$(( total + size_bytes ))
     done
@@ -578,8 +574,7 @@ devtools::_flutter() {
       local build_size
       build_size=$(utils::get_size_bytes "${project_dir}/build")
       total_bytes=$(( total_bytes + build_size ))
-      log::info "  ${ARROW} $(utils::format_bytes "$build_size")  ${project_dir}/build"
-      safe_rm "${project_dir}/build" "Flutter build directory"
+      safe_rm "${project_dir}/build" "Flutter build: ${project_dir##*/}"
     fi
 
     # .dart_tool/ directory
@@ -587,8 +582,7 @@ devtools::_flutter() {
       local dt_size
       dt_size=$(utils::get_size_bytes "${project_dir}/.dart_tool")
       total_bytes=$(( total_bytes + dt_size ))
-      log::info "  ${ARROW} $(utils::format_bytes "$dt_size")  ${project_dir}/.dart_tool"
-      safe_rm "${project_dir}/.dart_tool" "Flutter .dart_tool"
+      safe_rm "${project_dir}/.dart_tool" "Flutter .dart_tool: ${project_dir##*/}"
     fi
 
   done < <(

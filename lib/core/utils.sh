@@ -91,6 +91,30 @@ log::verbose() {
   _log_to_file "VERBOSE" "$1"
 }
 
+# One line per path that will be (or was) removed:  "   20.5 MB  Spotify cache".
+#
+# Modules used to print their own "→ size path" line and then safe_rm printed a
+# second "[DRY-RUN] size label" line for the same path, so a full run was ~250
+# lines of mostly duplicated text padded with 0 B entries. A preview has to show
+# every path it would delete, so nothing is truncated — only the noise is gone.
+log::item() {
+  local bytes="${1:-0}"
+  local label="$2"
+  local silent="${3:-false}"
+
+  # A zero-byte path frees nothing; listing it only buries the real findings.
+  (( bytes > 0 )) || return 0
+  [[ "$silent" == "true" && "$VERBOSE" != "true" ]] && return 0
+
+  # A live run marks each line as done; a preview leaves the mark blank. Both
+  # keep the size column in the same place so the two modes line up visually.
+  local mark="  "
+  [[ "$DRY_RUN" != "true" ]] && mark="${GREEN}${CHECK}${RESET} "
+
+  printf '  %s%s%10s%s  %s\n' "$mark" "${CYAN}" "$(utils::format_bytes "$bytes")" "${RESET}" "$label"
+  _log_to_file "ITEM" "$(utils::format_bytes "$bytes") ${label}"
+}
+
 log::section() {
   local title="$1"
   local width=50
@@ -340,9 +364,7 @@ safe_rm() {
   if [[ "$DRY_RUN" == "true" ]]; then
     TOTAL_DRYRUN_BYTES=$(( TOTAL_DRYRUN_BYTES + bytes ))
     SAFE_RM_LAST_BYTES=$bytes
-    if [[ "$use_silent" != "true" ]] || [[ "$VERBOSE" == "true" ]]; then
-      log::info "[DRY-RUN] ${bytes_fmt} ${label}"
-    fi
+    log::item "$bytes" "$label" "$use_silent"
     _oplog "DRYRUN" "$resolved" "$bytes_fmt"
     return 0
   fi
@@ -369,9 +391,7 @@ safe_rm() {
 
   TOTAL_FREED=$(( TOTAL_FREED + bytes ))
   SAFE_RM_LAST_BYTES=$bytes
-  if [[ "$use_silent" != "true" ]] || [[ "$VERBOSE" == "true" ]]; then
-    log::success "${label} ($(utils::format_bytes "$bytes"))"
-  fi
+  log::item "$bytes" "$label" "$use_silent"
   _oplog "REMOVED" "$resolved" "$bytes_fmt"
   return 0
 }
@@ -604,6 +624,11 @@ utils::with_spinner() {
 # Each module calls this at the end of its ::clean function to register results.
 # Category: "System", "Developer Tools", "Caches & Logs", "Storage Management"
 # Status: "clean", "skipped", "review", or byte count (means reclaimable)
+# Claim count at the point the previous module registered. The delta is how
+# many paths this module actually queued, which is the honest "items" figure —
+# it excludes anything protected, whitelisted or already counted elsewhere.
+_LAST_MODULE_CLAIM_MARK=0
+
 utils::register_module() {
   local name="$1"
   local category="${2:-}"
@@ -611,6 +636,13 @@ utils::register_module() {
   local freed="${4:-0}"
   local status="${5:-clean}"
   local projected="${6:-}"
+  local items="${7:-}"
+
+  if [[ -z "$items" ]]; then
+    items=$(( PROTECT_CLAIM_COUNT - _LAST_MODULE_CLAIM_MARK ))
+    (( items < 0 )) && items=0
+  fi
+  _LAST_MODULE_CLAIM_MARK=$PROTECT_CLAIM_COUNT
 
   if [[ -z "$projected" ]]; then
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -643,6 +675,20 @@ utils::register_module() {
   MODULE_FREED+=("$freed")
   MODULE_STATUS+=("$status")
   MODULE_PROJECTED+=("$projected")
+  MODULE_ITEMS+=("$items")
+}
+
+# Record something the user could reclaim but that needs an explicit opt-in.
+# Rendered as the report's "needs your decision" block.
+utils::register_action() {
+  local label="$1"
+  local bytes="${2:-0}"
+  local command="${3:-}"
+  [[ "$bytes" =~ ^[0-9]+$ ]] || bytes=0
+
+  ACTION_LABELS+=("$label")
+  ACTION_BYTES+=("$bytes")
+  ACTION_COMMANDS+=("$command")
 }
 
 # ── Category header ──────────────────────────────────────────────────────────

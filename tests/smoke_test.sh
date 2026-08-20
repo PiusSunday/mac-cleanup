@@ -64,12 +64,20 @@ else
   exit 1
 fi
 
-echo "Testing --all --dry-run --yes contains Summary Report..."
+echo "Testing --all --dry-run --yes prints the summary report..."
 output=$("$BIN" --all --dry-run --yes 2>&1)
-if echo "$output" | grep -q "Summary Report"; then
-  echo "✔ --all output contains 'Summary Report'"
+if echo "$output" | grep -q "RECLAIMABLE" && echo "$output" | grep -q "Total"; then
+  echo "✔ --all output contains the summary table"
 else
-  echo "✘ --all output missing 'Summary Report'"
+  echo "✘ --all output missing the summary table"
+  exit 1
+fi
+
+echo "Testing dry-run summary ends with the call to action..."
+if echo "$output" | grep -qE "This was a preview|already clean"; then
+  echo "✔ dry-run summary states it was a preview"
+else
+  echo "✘ dry-run summary missing preview notice"
   exit 1
 fi
 

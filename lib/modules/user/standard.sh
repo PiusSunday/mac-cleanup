@@ -75,8 +75,6 @@ caches::_user_caches() {
     return 0
   fi
 
-  log::info "Scanning user caches (${path})..."
-
   # Enumerate subdirectories with sizes; skip caches of running apps
   local total=0
   while IFS= read -r cache_dir; do
@@ -94,19 +92,11 @@ caches::_user_caches() {
       log::verbose "Skipping active app cache: ${app_name}"
       continue
     fi
-    local size_bytes
-    size_bytes=$(utils::get_size_bytes "$cache_dir")
-    local size_fmt
-    size_fmt=$(utils::format_bytes "$size_bytes")
-    log::info "  ${ARROW} ${size_fmt}  ${cache_dir}"
-    safe_rm "$cache_dir" "User cache: ${app_name}"
+    safe_rm "$cache_dir" "$app_name"
     total=$(( total + SAFE_RM_LAST_BYTES ))
   done < <(find "$path" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true)
 
   _CACHES_USER_TOTAL=$total
-  local total_fmt
-  total_fmt=$(utils::format_bytes "$total")
-  log::info "User caches total: ${total_fmt}"
 }
 
 # ~/Library/Logs itself is SIP-protected, so the directory is never removed.
@@ -146,7 +136,6 @@ caches::_app_support_caches() {
     return 0
   fi
 
-  log::info "Scanning Application Support caches..."
   local total=0
   while IFS= read -r cache_dir; do
     [[ -n "$cache_dir" ]] || continue
@@ -164,12 +153,7 @@ caches::_app_support_caches() {
       continue
     fi
 
-    local size_bytes
-    size_bytes=$(utils::get_size_bytes "$cache_dir")
-    local size_fmt
-    size_fmt=$(utils::format_bytes "$size_bytes")
-    log::info "  ${ARROW} ${size_fmt}  ${cache_dir}"
-    safe_rm "$cache_dir" "App Support: ${app_name}/$(basename "$cache_dir")"
+    safe_rm "$cache_dir" "${app_name}/$(basename "$cache_dir")"
     # Count only what safe_rm accepted. The editor-cache sweep in devtools.sh
     # reaches several of these paths first, and adding the du result here
     # regardless is what made Found exceed Reclaimable.

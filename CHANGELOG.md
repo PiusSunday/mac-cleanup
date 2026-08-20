@@ -49,10 +49,19 @@ developer Mac — superseded Xcode simulator runtimes — is finally handled ins
 - **`~/.gradle/caches` was deleted wholesale**, forcing a full re-download of every dependency.
   Only regenerated build state (`build-cache-*`, `transforms-*`, `journal-*`, `jars-*`) is removed;
   `modules-2` is kept and its retained size is reported.
+- **`install.sh` printed an empty version.** It read the version from `lib/core.sh`, a path that
+  moved to `lib/core/core.sh` in the v0.4.0 refactor, so every script install since then has
+  reported `mac-cleanup v installed successfully!`.
 - **Empty arrays aborted the run on bash 3.2.** macOS ships bash 3.2, where `"${arr[@]}"` on an
   empty array is an unbound variable under `set -u`. Guarded the arrays that can be empty.
 - **`du` could hang the run and over-count.** Size probes now use `du -skPx` — never following
   symlinks, never crossing into a mounted volume or network share — and are time-boxed.
+- **Orphan detection matched almost nothing.** `orphans::_normalize_name` piped through
+  `tr -cd '[:alnum:]'`, which strips the trailing newline along with the punctuation, so every
+  name was appended to the installed-apps file without one and the whole file collapsed to a
+  single concatenated line. `sort -u` had nothing to dedupe and the exact `grep -Fxq` lookup
+  could never match, leaving detection to a loose substring search. Fixing it cut the false
+  positives on the development machine from 32 candidates to 18.
 - **`utils::format_bytes` no longer forks `bc`** or parses floats, removing the last locale-sensitive
   arithmetic; it also gained TB support and returns `0 B` for malformed input.
 
@@ -76,6 +85,22 @@ developer Mac — superseded Xcode simulator runtimes — is finally handled ins
 
 ### Changed
 
+- **Rewrote the summary report.** Modules are ranked by what they can reclaim with a
+  proportional bar, so the biggest win is the top row. The duplicated `Found` column is gone
+  now that Found and Reclaimable are always equal. Modules with nothing to do are named on one
+  line instead of taking a table row each, and an `ITEMS` column reports how many paths were
+  actually queued (`—` for modules that clean through their own CLI).
+- **Added a "needs your decision" block.** Everything the tool found but will not remove on its
+  own — superseded simulator runtimes, unused Docker images, orphan candidates — is collected
+  with its size and the exact command that would remove it. On the development machine that is
+  38.5 GB, against 1.3 GB of automatic cleanup; previously it was scattered through the log or
+  invisible.
+- **Halved the run log without hiding anything.** Modules used to print a `→ size path` line and
+  then safe_rm printed a second `[DRY-RUN] size label` line for the same path, padded with 0 B
+  entries. There is now one line per path, and age-gated bulk sweeps (rotated logs, `.DS_Store`,
+  temp files) roll up into a single line — `--verbose` still lists every path, and nothing is
+  truncated in either mode. A full `--all --dry-run` went from 266 lines to 223 while carrying
+  more information.
 - Editor cache coverage extended to VS Code Insiders, Windsurf, Zed, VSCodium and Antigravity IDE.
 - The running-app check no longer greps the whole `launchctl list` output for a substring (which
   matched almost anything); it resolves known cache-directory owners, tries the bundle id's leaf

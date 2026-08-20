@@ -187,5 +187,9 @@ docker::_report_unused_images() {
     printf '  • %-48s %10s  %s\n' "$name" "$size" "$id"
   done
   printf '    Total: %s\n' "$(utils::format_bytes "$total")"
-  printf '    → Remove one with: docker rmi <name>\n'
+
+  utils::register_action \
+    "${#unused[@]} unused Docker images (listed above)" \
+    "$total" \
+    "docker rmi <name>"
 }

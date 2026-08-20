@@ -59,6 +59,13 @@ declare -a MODULE_SCANNED=()
 declare -a MODULE_FREED=()
 declare -a MODULE_STATUS=()
 declare -a MODULE_PROJECTED=()
+declare -a MODULE_ITEMS=()
+
+# Opt-in wins surfaced in the report's "needs your decision" block: things the
+# tool found but will not remove without an explicit flag.
+declare -a ACTION_LABELS=()
+declare -a ACTION_BYTES=()
+declare -a ACTION_COMMANDS=()
 
 # Paths that macOS SIP or system ownership protects — never attempt deletion
 # Adding a path here prevents all modules from queuing it for rm
