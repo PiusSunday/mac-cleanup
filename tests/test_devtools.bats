@@ -278,3 +278,117 @@ _make_project() {
   [[ "$output" == *"appone/android/.gradle"* ]]
   [[ "$output" == *"apptwo/android/.gradle"* ]]
 }
+
+# ── Editor workspace storage ──────────────────────────────────────────────────
+# v0.5.1 selected workspaceStorage directories with `find -mtime +30` alone,
+# which answers "not opened recently", not "no longer needed". On the
+# development machine that flagged 27 workspaces whose projects still existed —
+# 862 MB of live editor state, including the repo open at the time — against 3
+# that were genuinely dead.
+
+_make_workspace() {
+  local editor="$1" hash="$2" json="$3"
+  local dir="$HOME/Library/Application Support/$editor/User/workspaceStorage/$hash"
+  mkdir -p "$dir"
+  dd if=/dev/zero of="$dir/state.vscdb" bs=1024 count=256 2>/dev/null
+  [[ "$json" == "NONE" ]] || printf '%s' "$json" > "$dir/workspace.json"
+  # Older than the 30-day gate so only the folder check decides.
+  touch -t "$(date -r "$(( $(date +%s) - 200 * 86400 ))" +%Y%m%d%H%M.%S)" "$dir"
+  printf '%s\n' "$dir"
+}
+
+@test "devtools: a workspace whose project still exists is kept" {
+  local proj="$HOME/Developer/liveproject"
+  mkdir -p "$proj"
+  local ws
+  ws=$(_make_workspace Code alive "{\"folder\": \"file://$proj\"}")
+
+  run devtools::_workspace_is_dead "$ws"
+  [ "$status" -ne 0 ]
+}
+
+@test "devtools: a workspace whose project was deleted is reclaimable" {
+  local ws
+  ws=$(_make_workspace Code dead '{"folder": "file:///Users/nobody/deleted-project"}')
+
+  run devtools::_workspace_is_dead "$ws"
+  [ "$status" -eq 0 ]
+}
+
+@test "devtools: a percent-encoded project path is decoded before checking" {
+  # "SoCode Flutter Projects" is stored as SoCode%20Flutter%20Projects; failing
+  # to decode means concluding a live folder is gone.
+  local proj="$HOME/Developer/Space Named Project"
+  mkdir -p "$proj"
+  local encoded="${proj// /%20}"
+  local ws
+  ws=$(_make_workspace Code encoded "{\"folder\": \"file://$encoded\"}")
+
+  run devtools::_workspace_folder "$ws/workspace.json"
+  [ "$output" = "$proj" ]
+
+  run devtools::_workspace_is_dead "$ws"
+  [ "$status" -ne 0 ]
+}
+
+@test "devtools: a workspace with no workspace.json is kept, never guessed at" {
+  local ws
+  ws=$(_make_workspace Code nojson NONE)
+
+  run devtools::_workspace_is_dead "$ws"
+  [ "$status" -ne 0 ]
+}
+
+@test "devtools: an unparseable workspace.json is kept" {
+  local ws
+  ws=$(_make_workspace Code broken 'not json at all {{{')
+
+  run devtools::_workspace_is_dead "$ws"
+  [ "$status" -ne 0 ]
+}
+
+@test "devtools: a remote workspace is kept — its folder cannot be checked here" {
+  local ws
+  ws=$(_make_workspace Code remote '{"folder": "vscode-remote://ssh-remote%2Bbox/home/me/proj"}')
+
+  run devtools::_workspace_is_dead "$ws"
+  [ "$status" -ne 0 ]
+}
+
+@test "devtools: a .code-workspace file entry is understood too" {
+  local ws
+  ws=$(_make_workspace Code multiroot '{"workspace": "file:///Users/nobody/gone.code-workspace"}')
+
+  run devtools::_workspace_is_dead "$ws"
+  [ "$status" -eq 0 ]
+}
+
+@test "devtools: the editor sweep deletes only the dead workspace" {
+  local proj="$HOME/Developer/stillhere"
+  mkdir -p "$proj"
+  local alive dead nojson
+  alive=$(_make_workspace Code w-alive "{\"folder\": \"file://$proj\"}")
+  dead=$(_make_workspace Code w-dead '{"folder": "file:///Users/nobody/gone"}')
+  nojson=$(_make_workspace Code w-nojson NONE)
+
+  DRY_RUN=false
+  run devtools::_vscode
+  [ "$status" -eq 0 ]
+
+  [ -d "$alive" ]
+  [ -d "$nojson" ]
+  [ ! -d "$dead" ]
+}
+
+@test "devtools: mtime alone never selects a workspace" {
+  # The regression: an old directory for a project that still exists.
+  local proj="$HOME/Developer/oldbutalive"
+  mkdir -p "$proj"
+  local ws
+  ws=$(_make_workspace Code ancient "{\"folder\": \"file://$proj\"}")
+  touch -t 200001010000.00 "$ws"
+
+  DRY_RUN=false
+  devtools::_vscode >/dev/null 2>&1
+  [ -d "$ws" ]
+}

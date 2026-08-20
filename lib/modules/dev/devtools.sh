@@ -819,6 +819,63 @@ devtools::_android() {
   _DEV_ANDROID_TOTAL=$total
 }
 
+# Extract the project path a workspaceStorage directory belongs to.
+#
+# workspace.json holds a file:// URI under "folder" (single-folder workspaces)
+# or "workspace" (.code-workspace files). The path is percent-encoded, so a
+# project with a space in its name decodes to a different string than it is
+# stored as — decoding it wrong means concluding the folder is gone.
+devtools::_workspace_folder() {
+  local ws_json="$1"
+  [[ -f "$ws_json" ]] || return 1
+
+  local uri
+  # -E: BSD sed has no BRE alternation, so \(a\|b\) silently matches nothing and
+  # every workspace would look unparseable — safe, but the check would be dead.
+  uri=$(sed -nE 's/.*"(folder|workspace)"[[:space:]]*:[[:space:]]*"([^"]*)".*/\2/p' "$ws_json" | head -1)
+  [[ -n "$uri" ]] || return 1
+
+  # Only local paths can be checked for existence; a remote or virtual
+  # workspace (vscode-remote://, ssh://) is unknowable from here.
+  case "$uri" in
+    file://*) ;;
+    *) return 1 ;;
+  esac
+
+  local path="${uri#file://}"
+  # Percent-decoding via printf %b, with literal backslashes protected first.
+  path="${path//\\/\\\\}"
+  path="${path//%/\\x}"
+  printf '%b\n' "$path"
+}
+
+# A workspace is dead only when its project folder is provably gone.
+# Anything undatable — no workspace.json, unparseable, or a remote URI — is
+# kept, the same rule the stale-artifact scan uses for projects it cannot date.
+devtools::_workspace_is_dead() {
+  local ws_dir="$1"
+  local ws_json="$ws_dir/workspace.json"
+
+  if [[ ! -f "$ws_json" ]]; then
+    log::verbose "  Keeping ${ws_dir##*/}: no workspace.json to identify its project"
+    return 1
+  fi
+
+  local folder
+  if ! folder=$(devtools::_workspace_folder "$ws_json") || [[ -z "$folder" ]]; then
+    log::verbose "  Keeping ${ws_dir##*/}: workspace.json names no local folder"
+    return 1
+  fi
+
+  if [[ -e "$folder" ]]; then
+    log::verbose "  Keeping ${ws_dir##*/}: ${folder} still exists"
+    return 1
+  fi
+
+  log::verbose "  Dead workspace ${ws_dir##*/}: ${folder} no longer exists"
+  return 0
+}
+
 # ── k) VS Code / Editor Caches ───────────────────────────────────────────────
 devtools::_vscode() {
   _DEV_VSCODE_TOTAL=0
@@ -846,16 +903,25 @@ devtools::_vscode() {
       safe_rm "$p" "$editor cache/log: $sub"
     done
 
-    # Workspace storage older than 30 days
+    # Workspace storage whose project folder no longer exists.
+    #
+    # Until v0.5.2 this selected purely on `find -mtime +30`, which answers
+    # "not opened recently", not "no longer needed". On the development machine
+    # that flagged 27 workspaces for projects that still exist — 862 MB of live
+    # editor state including the repository open at the time — against 3 that
+    # were genuinely dead. Each hash directory records the project it belongs to
+    # in workspace.json; that is the only thing that can distinguish the two.
     local storage="$base/User/workspaceStorage"
     if [[ -d "$storage" ]]; then
-      while IFS= read -r stale_dir; do
-        [[ -n "$stale_dir" ]] || continue
+      while IFS= read -r ws_dir; do
+        [[ -n "$ws_dir" ]] || continue
+        devtools::_workspace_is_dead "$ws_dir" || continue
+
         local size
-        size=$(utils::get_size_bytes "$stale_dir")
+        size=$(utils::get_size_bytes "$ws_dir")
         (( size > 0 )) || continue
-        total=$(( total + size ))
-        safe_rm "$stale_dir" "$editor stale workspace: $(basename "$stale_dir")"
+        safe_rm "$ws_dir" "$editor workspace for a deleted project: $(basename "$ws_dir")"
+        total=$(( total + SAFE_RM_LAST_BYTES ))
       done < <(find "$storage" -mindepth 1 -maxdepth 1 -type d -mtime +30 2>/dev/null || true)
     fi
   done
