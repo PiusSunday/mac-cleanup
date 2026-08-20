@@ -57,3 +57,65 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Corrupt plist"* ]]
 }
+
+# ── Regressions fixed in v0.5.0 ───────────────────────────────────────────────
+
+@test "orphans: an installed app's extensions are not orphans" {
+  # net.whatsapp.WhatsApp.ServiceExtension extends an installed bundle id, but
+  # v0.4.x normalized the full identifier and found no exact match, so every
+  # extension of every installed app was reported as an orphan.
+  local installed
+  installed=$(mktemp "${BATS_TEST_TMPDIR:-/tmp}/installed.XXXXXX")
+  orphans::_normalize_name "net.whatsapp.WhatsApp" > "$installed"
+
+  run orphans::_looks_installed "net.whatsapp.WhatsApp.ServiceExtension" "$installed"
+  [ "$status" -eq 0 ]
+  run orphans::_looks_installed "net.whatsapp.WhatsApp.Intents" "$installed"
+  [ "$status" -eq 0 ]
+  run orphans::_looks_installed "com.unrelated.Vendor.Thing" "$installed"
+  [ "$status" -ne 0 ]
+}
+
+@test "orphans: system preference domains are never scanned as candidates" {
+  local old_epoch stamp name
+  old_epoch=$(( $(date +%s) - 86400 * 120 ))
+  stamp=$(date -r "$old_epoch" +%Y%m%d%H%M.%S)
+
+  for name in loginwindow .GlobalPreferences_m corespotlightd sharedfilelistd icdd; do
+    printf 'payload' > "$HOME/Library/Preferences/${name}.plist"
+    touch -t "$stamp" "$HOME/Library/Preferences/${name}.plist"
+  done
+
+  local installed
+  installed=$(mktemp "${BATS_TEST_TMPDIR:-/tmp}/installed.XXXXXX")
+  : > "$installed"
+
+  ORPHAN_CANDIDATES=()
+  _ORPHAN_TOTAL=0
+  run orphans::_scan_preferences "$installed"
+  [ "$status" -eq 0 ]
+
+  for name in loginwindow .GlobalPreferences_m corespotlightd sharedfilelistd icdd; do
+    [[ "$output" != *"Orphan candidate: ${name}"* ]]
+  done
+}
+
+@test "orphans: Apple group containers are skipped" {
+  local old_epoch stamp
+  old_epoch=$(( $(date +%s) - 86400 * 120 ))
+  stamp=$(date -r "$old_epoch" +%Y%m%d%H%M.%S)
+
+  mkdir -p "$HOME/Library/Containers/group.com.apple.storekit"
+  echo payload > "$HOME/Library/Containers/group.com.apple.storekit/data"
+  touch -t "$stamp" "$HOME/Library/Containers/group.com.apple.storekit"
+
+  local installed
+  installed=$(mktemp "${BATS_TEST_TMPDIR:-/tmp}/installed.XXXXXX")
+  : > "$installed"
+
+  ORPHAN_CANDIDATES=()
+  _ORPHAN_TOTAL=0
+  run orphans::_scan_containers "$installed"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"group.com.apple.storekit"* ]]
+}

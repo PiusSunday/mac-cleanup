@@ -7,6 +7,82 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.5.0] - 2026-08-20
+
+A correctness and safety release. Every deletion now routes through a single policy, the dry-run
+preview reports the number a live run actually frees, and the largest reclaimable artifact on a
+developer Mac — superseded Xcode simulator runtimes — is finally handled instead of just mentioned.
+
+### Fixed
+
+- **CRITICAL — live databases were deleted.** `apps.sh` skipped Apple sandboxes by testing for a
+  `com.apple.` prefix, which Apple's *group* containers do not have. On a normal machine that put
+  `group.com.apple.storekit/Library/Caches/storeUser.db` and its `-wal`/`-shm` sidecars into the
+  delete queue; removing the sidecars of an open SQLite database corrupts it. Apple sandboxes are
+  now matched under every prefix Apple uses, and the protection policy refuses any `*.db` /
+  `*.sqlite*` family member that is open (verified via a live `-shm` or `lsof`).
+- **CRITICAL — `--clean-orphans --yes` deleted macOS system preferences.** The orphan scanner
+  filtered only `com.apple.*` domains, so bare-named ones (`loginwindow`, `.GlobalPreferences_m`,
+  `corespotlightd`, `sharedfilelistd`, `icdd`) were offered as orphan candidates and removed
+  without prompting under `--yes`.
+- **CRITICAL — installed apps' extensions were reported as orphans.** Identifiers such as
+  `net.whatsapp.WhatsApp.ServiceExtension` extend an installed bundle id, but the matcher only
+  looked for an exact normalized line. Matching now walks the identifier from the outside in, so a
+  match on any ancestor counts as installed.
+- **`--dry-run` could block waiting for input.** The Flutter pub-cache prompt called
+  `utils::confirm` during a preview. `utils::confirm` now declines without prompting in dry-run,
+  and declines instead of hanging in a non-interactive shell.
+- **The preview never matched a live run.** The user-cache sweep, the browser sweep, the Spotify
+  and Apple-media sweeps and the container sweep all walked overlapping paths, and every pass added
+  the same bytes again. `~/Library/Caches` now has exactly one owner, and a per-run claim ledger
+  guarantees each path is counted once. Measured on an identical fixture: v0.4.3 previewed
+  1,232,896 B and freed 1,028,096 B; v0.5.0 previews and frees 512,000 B.
+- **The "Found" column overstated what could be reclaimed.** On a real machine v0.4.3 reported
+  "21.2 GB found / 848.5 MB reclaimable". Docker summed the *Size* column of `docker system df`
+  (every running container's image and every mounted volume); pnpm reported the whole store rather
+  than what `pnpm store prune` drops; Xcode reported the whole Archives tree while removing only
+  archives older than 90 days; the user-logs scan measured a SIP-protected directory it never
+  queued. Each now reports only what it will actually remove.
+- **Snapshots always claimed snapshots existed.** `tmutil listlocalsnapshots /` prints a header
+  even when there are none, and the emptiness test matched that header. Only real
+  `com.apple.TimeMachine.*` identifiers are counted now.
+- **`~/.gradle/caches` was deleted wholesale**, forcing a full re-download of every dependency.
+  Only regenerated build state (`build-cache-*`, `transforms-*`, `journal-*`, `jars-*`) is removed;
+  `modules-2` is kept and its retained size is reported.
+- **Empty arrays aborted the run on bash 3.2.** macOS ships bash 3.2, where `"${arr[@]}"` on an
+  empty array is an unbound variable under `set -u`. Guarded the arrays that can be empty.
+- **`du` could hang the run and over-count.** Size probes now use `du -skPx` — never following
+  symlinks, never crossing into a mounted volume or network share — and are time-boxed.
+- **`utils::format_bytes` no longer forks `bc`** or parses floats, removing the last locale-sensitive
+  arithmetic; it also gained TB support and returns `0 B` for malformed input.
+
+### Added
+
+- `lib/core/protect.sh` — one deletion-protection policy for the whole tool: system paths, user
+  data roots, credential stores, open SQLite families, macOS service caches, the Neural Engine
+  compiled-model cache, and macOS preference domains.
+- `--simulators` — deletes superseded Xcode simulator runtimes (keeping the newest per platform)
+  and prunes unavailable simulator devices. Runtimes macOS has marked unusable are always removed;
+  superseded ones ask per runtime. On the development machine this surfaced 23.6 GB that v0.4.3
+  listed as "informational — never auto-deleted".
+- `--include-system-caches` — opt in to purging `~/Library/Caches/com.apple.*`, off by default
+  because those caches are rebuilt by background daemons within minutes.
+- Docker now lists unused but *tagged* images individually, with size, ID and the `docker rmi`
+  command, instead of either ignoring them or prune-deleting them.
+- The summary report shows how many paths were skipped by policy and how many were already counted
+  by another module.
+- `tests/test_protect.bats` — 23 cases covering the policy and the ledger, including a test that
+  asserts the dry-run and live totals are equal.
+
+### Changed
+
+- Editor cache coverage extended to VS Code Insiders, Windsurf, Zed, VSCodium and Antigravity IDE.
+- The running-app check no longer greps the whole `launchctl list` output for a substring (which
+  matched almost anything); it resolves known cache-directory owners, tries the bundle id's leaf
+  component, and matches launchd labels exactly.
+- Orphan detection also reads `/System/Applications` and `/Applications/Setapp`.
+- A full `--all --dry-run` on the development machine went from 154 s to 117 s.
+
 ## [v0.4.3] - 2026-03-15
 
 ### Fixed

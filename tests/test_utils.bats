@@ -131,10 +131,28 @@ teardown() {
 
 # ── utils::confirm ────────────────────────────────────────────────────────────
 
-@test "utils::confirm: returns 0 immediately when SKIP_CONFIRM=true" {
+@test "utils::confirm: returns 0 immediately when SKIP_CONFIRM=true in live mode" {
+  DRY_RUN=false
   SKIP_CONFIRM=true
   run utils::confirm "Are you sure?"
   [ "$status" -eq 0 ]
+}
+
+@test "utils::confirm: declines without prompting during a dry run" {
+  # A preview must never block on stdin. Before v0.5.0 the Flutter pub-cache
+  # prompt hung --dry-run waiting for input.
+  DRY_RUN=true
+  SKIP_CONFIRM=false
+  run utils::confirm "Are you sure?"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"[y/N]"* ]]
+}
+
+@test "utils::confirm: dry run declines even when SKIP_CONFIRM is set" {
+  DRY_RUN=true
+  SKIP_CONFIRM=true
+  run utils::confirm "Are you sure?"
+  [ "$status" -ne 0 ]
 }
 
 # ── utils::register_module ────────────────────────────────────────────────────

@@ -33,25 +33,33 @@ teardown() {
   [ "$status" -ne 0 ]
 }
 
-@test "arc_detects_all_five_paths" {
-  # Create fake dirs for all 5 arc paths
-  mkdir -p "$HOME/Library/Caches/company.thebrowser.Browser"
+@test "arc_detects_its_application_support_caches" {
+  # ~/Library/Caches/company.thebrowser.Browser is deliberately absent: it
+  # belongs to caches::_user_caches, which owns everything under
+  # ~/Library/Caches. Claiming it here too is what double-counted those bytes.
   mkdir -p "$HOME/Library/Application Support/Arc/User Data/Default/Cache/Cache_Data"
   mkdir -p "$HOME/Library/Application Support/Arc/User Data/Default/GPUCache"
   mkdir -p "$HOME/Library/Application Support/Arc/User Data/Default/Code Cache"
   mkdir -p "$HOME/Library/Application Support/Arc/User Data/ShaderCache"
   
   # Add some bytes to each
-  echo "test" > "$HOME/Library/Caches/company.thebrowser.Browser/f1"
   echo "test" > "$HOME/Library/Application Support/Arc/User Data/Default/Cache/Cache_Data/f2"
   echo "test" > "$HOME/Library/Application Support/Arc/User Data/Default/GPUCache/f3"
   echo "test" > "$HOME/Library/Application Support/Arc/User Data/Default/Code Cache/f4"
   echo "test" > "$HOME/Library/Application Support/Arc/User Data/ShaderCache/f5"
 
   browsers::_arc >/dev/null 2>&1
-  
+
   # Ensure total is greater than 0
   [ "$_BROWSERS_TOTAL" -gt 0 ]
+}
+
+@test "arc: the browser module no longer claims the shared user-cache path" {
+  # Regression guard for the overlap removed in v0.5.0. Comments may still
+  # explain the path, so only executable lines are checked.
+  run bash -c "grep -v '^[[:space:]]*#' '$BATS_TEST_DIRNAME/../lib/modules/user/browsers.sh' \
+    | grep -c 'Library/Caches/company.thebrowser.Browser'"
+  [ "$output" = "0" ]
 }
 
 @test "browser_skip_does_not_crash_module" {

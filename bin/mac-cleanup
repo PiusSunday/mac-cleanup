@@ -9,6 +9,8 @@ LIB_DIR="${SCRIPT_DIR}/../lib"
 # ── Source core and utilities first ──────────────────────────────────────────
 # shellcheck source=../lib/core/core.sh
 source "${LIB_DIR}/core/core.sh"
+# shellcheck source=../lib/core/protect.sh
+source "${LIB_DIR}/core/protect.sh"
 # shellcheck source=../lib/core/utils.sh
 source "${LIB_DIR}/core/utils.sh"
 # shellcheck source=../lib/core/preflight.sh
@@ -63,6 +65,7 @@ ${BOLD}TARGETS:${RESET}
   --docker, -d       Clean Docker containers, images, volumes, build cache
   --devtools, -D     Clean orphaned node_modules, Rust targets, __pycache__, Gradle, Flutter
   --snapshots, -s    Delete local Time Machine snapshots
+  --simulators       Delete unusable Xcode simulator runtimes and stale devices
   --caches, -c       Clear ~/Library/Caches, Zsh, Spotify, JetBrains, and app caches
   --mail, -m         Clean old Mail downloads and recent-item metadata
   --brew, -b         Run brew cleanup and autoremove
@@ -75,6 +78,8 @@ ${BOLD}OPTIONS:${RESET}
   --clean-orphans    Delete orphan candidates after per-item confirmation
   --devops-reset     Run nuclear cleanup for Docker and developer ecosystems
   --include-ml-models Include HuggingFace/Ollama model caches during DevOps reset
+  --include-system-caches
+                     Also purge macOS service caches (~/Library/Caches/com.apple.*)
   --show-log         Print operation log and exit
   --version, -V      Print version and exit
   --verbose, -v      Show detailed logs
@@ -88,6 +93,7 @@ ${BOLD}EXAMPLES:${RESET}
   mac-cleanup --devtools            Find orphaned build artifacts
   mac-cleanup --devops-reset --yes  Nuclear cleanup of dev toolchain caches
   mac-cleanup --show-log            Show deletion operation log
+  mac-cleanup --simulators          Reclaim unusable Xcode simulator runtimes
   mac-cleanup --version             Show the current version
 
 ${YELLOW}${WARN}  Running mac-cleanup without cleanup targets defaults to a safe --all --dry-run preview.${RESET}
@@ -201,6 +207,14 @@ parse_flags() {
         ;;
       --include-ml-models)
         INCLUDE_ML_MODELS=true
+        ;;
+      --include-system-caches)
+        INCLUDE_SYSTEM_CACHES=true
+        ;;
+      --simulators)
+        TARGET_SIMULATORS=true
+        TARGET_XCODE=true
+        target_specified=true
         ;;
       --show-log)
         SHOW_OPERATION_LOG=true
@@ -381,6 +395,16 @@ print_report() {
     printf '  Free space:  %s → %s\n' "$free_before_fmt" "$free_after_fmt"
   fi
 
+  if (( TOTAL_PROTECTED > 0 )) || (( TOTAL_DEDUPED > 0 )); then
+    printf '  Skipped:     %s protected by policy' "$TOTAL_PROTECTED"
+    if (( TOTAL_DEDUPED > 0 )); then
+      printf ', %s already counted by another module' "$TOTAL_DEDUPED"
+    fi
+    printf '\n'
+    if [[ "$VERBOSE" != "true" ]]; then
+      printf '               %s(re-run with --verbose to list them)%s\n' "${DIM}" "${RESET}"
+    fi
+  fi
   printf '  Log saved:   %s\n' "$LOG_FILE"
   printf '\n'
   printf '  %sStatus legend:%s\n' "${BOLD}" "${RESET}"
@@ -414,6 +438,11 @@ main() {
 
   utils::check_macos
   utils::load_whitelist
+
+  # One ledger per run: every path is counted at most once, so the dry-run
+  # preview and a live run report the same number.
+  protect::claim_reset
+  trap 'protect::claim_release' EXIT
 
   # Capture start time for duration tracking
   local start_time

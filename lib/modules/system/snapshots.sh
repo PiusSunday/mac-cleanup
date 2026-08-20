@@ -12,8 +12,12 @@ snapshots::clean() {
 
   log::warn "Deleting local snapshots means losing 'Go Back' ability in Time Machine for local changes."
 
+  # `tmutil listlocalsnapshots /` always prints a "Snapshots for disk /:" header,
+  # so a plain emptiness test reported snapshots on every machine and the tool
+  # claimed it would run deletelocalsnapshots when there was nothing to delete.
+  # Count only real snapshot identifiers.
   local snapshots
-  snapshots=$(tmutil listlocalsnapshots / 2>/dev/null)
+  snapshots=$(tmutil listlocalsnapshots / 2>/dev/null | grep -E '^com\.apple\.TimeMachine\.' || true)
 
   local freed_before=$TOTAL_FREED
   local dryrun_before=$TOTAL_DRYRUN_BYTES
@@ -53,11 +57,13 @@ snapshots::clean() {
 
 # List local snapshots with timestamps
 snapshots::list() {
-  tmutil listlocalsnapshots / 2>/dev/null | while IFS= read -r snap; do
-    local date_str
-    date_str=$(echo "$snap" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}' || true)
-    printf "  %s  (%s)\n" "$snap" "$date_str"
-  done
+  tmutil listlocalsnapshots / 2>/dev/null \
+    | grep -E '^com\.apple\.TimeMachine\.' \
+    | while IFS= read -r snap; do
+        local date_str
+        date_str=$(echo "$snap" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}' || true)
+        printf "  %s  (%s)\n" "$snap" "$date_str"
+      done
 }
 
 snapshots::_in_progress() {

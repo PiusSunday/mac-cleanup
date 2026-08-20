@@ -29,3 +29,21 @@ setup() {
   [[ "${MODULE_NAMES[0]}" == "Apps & Containers" ]]
   [[ "${MODULE_CATEGORIES[0]}" == "Caches & Logs" ]]
 }
+
+# ── Regressions fixed in v0.5.0 ───────────────────────────────────────────────
+
+@test "apps: recognises Apple sandboxes under every prefix Apple uses" {
+  # "group.com.apple.storekit" does not start with "com.apple.", so v0.4.x let
+  # it through and queued the live storeUser.db plus its -wal/-shm sidecars.
+  for cname in com.apple.mail group.com.apple.storekit 6N38VWS5BX.com.apple.oneup; do
+    run apps::_is_apple_container "$cname"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "apps: third-party containers remain eligible" {
+  for cname in com.tinyspeck.slackmacgap net.whatsapp.WhatsApp group.com.example.app; do
+    run apps::_is_apple_container "$cname"
+    [ "$status" -ne 0 ]
+  done
+}

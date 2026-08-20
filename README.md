@@ -32,10 +32,11 @@ Macs aren't designed to naturally tidy up after developers. Whether you're build
 | `--system-deep`  | Deep System   | Age-gated unified logs (14d), diagnostic logs, MacOS Installer payloads (14d), Safari content cache, `com.apple.nsurlsessiond` | 1–12 GB         |
 | `--clean-orphans`| Orphans       | Deletes suspected orphaned App containers and plists using per-item confirmation. Defaults to report-only (`Needs review`) without this flag.  | 1–10 GB         |
 | `--xcode`        | Xcode         | DerivedData, Archives (90d+), iOS DeviceSupport, Simulators, CoreSimulator logs                                                | 10–90 GB        |
+| `--simulators`   | Xcode         | Superseded simulator runtimes (keeps the newest per platform) and unavailable simulator devices                                | 8–40 GB         |
 | `--docker`       | Docker        | Precision cleanup of stopped containers, dangling images, dangling volumes, build cache                                        | 5–30 GB         |
 | `--devtools`     | Dev Artifacts | `node_modules` (orphaned), Rust `target/`, Python `__pycache__`, Flutter, Gradle, Ruby caches                                  | 5–60 GB         |
 | `--snapshots`    | Snapshots     | Local Time Machine snapshots & stale `.inProgress` backups                                                                     | 5–20 GB         |
-| `--caches`       | Caches        | ~/Library/Caches, sandboxed app containers (safe skip of `com.apple.*`), Zsh, Spotify, JetBrains                               | 2–15 GB         |
+| `--caches`       | Caches        | ~/Library/Caches, Application Support caches/logs, Saved App State, Zsh, JetBrains                                             | 2–15 GB         |
 | `--mail`         | Mail          | Old Mail Downloads attachments and recent-item metadata                                                                        | 0.5–10 GB       |
 | `--brew`         | Homebrew      | Cached downloads, outdated versions, unused dependencies                                                                       | 1–5 GB          |
 | `--devops-reset` | DevOps Reset  | Cross-ecosystem deep cleanup for Docker and language toolchains; optional model caches with `--include-ml-models`              | 10–120+ GB      |
@@ -43,7 +44,9 @@ Macs aren't designed to naturally tidy up after developers. Whether you're build
 
 ### System Data clues
 
-The `--system` module also surfaces paths that contribute to the "System Data" bar in macOS Storage settings — but **never deletes them**. These include Simulator devices, Rosetta translation cache, Xcode runtime volumes, and legacy iOS firmware files. Each finding includes the path and a suggestion for how to investigate.
+The `--system` module also surfaces paths that contribute to the "System Data" bar in macOS Storage settings — but **never deletes them**. These include the Rosetta translation cache and legacy iOS firmware files. Each finding includes the path and a suggestion for how to investigate.
+
+Simulator runtimes are no longer only reported: `--simulators` removes the ones macOS has superseded, keeping the newest runtime for every platform.
 
 ---
 
@@ -218,6 +221,8 @@ mac-cleanup --version
 | `--clean-orphans`     | —     | false   | Delete orphan candidates after per-item confirmation                                            |
 | `--devops-reset`      | —     | false   | Run nuclear cleanup mode across Docker and developer ecosystems                                 |
 | `--include-ml-models` | —     | false   | Include `.cache/huggingface` and `.ollama/models` in DevOps reset                               |
+| `--simulators`        | —     | false   | Delete superseded Xcode simulator runtimes and prune unavailable devices                        |
+| `--include-system-caches` | — | false   | Also purge `~/Library/Caches/com.apple.*` (rebuilt by macOS; off by default)                    |
 | `--show-log`          | —     | false   | Print operation log from `~/.mac-cleanup/operations.log` and exit                               |
 | `--version`           | `-V`  | false   | Print the current mac-cleanup version and exit                                                  |
 | `--dry-run`           | `-n`  | —       | Preview only — no deletions (implicitly true when run without any target flags)                 |
@@ -239,19 +244,53 @@ To skip prompts and force live cleanup, pass `--yes`.
 
 ### What it will NEVER touch
 
+Every deletion in every module is routed through one policy in `lib/core/protect.sh`, so a path
+cannot be protected by one module and removed by another.
+
 ```bash
-/System/*
-/usr/*
-/bin/*
-/sbin/*
-/private/etc/*
-~/Library/Application Support/MobileSync/Backup/*   (iPhone backups)
-~/Library/Keychains/*
+# System
+/System/*  /usr/*  /bin/*  /sbin/*  /private/etc/*  /private/var/db/*  /Library/Apple/*
+
+# User data roots (the directories themselves — their contents stay eligible)
+~/Documents  ~/Desktop  ~/Pictures  ~/Movies  ~/Music  ~/Downloads  ~/Library
+
+# Credentials and keys
+~/.ssh/*  ~/.gnupg/*  ~/.aws/*  ~/.netrc  ~/.config/gh/*  ~/Library/Keychains/*
+*.pem  *.p12  id_rsa*  id_ed25519*  *credential*
+
+# Live databases
+*.db / *.sqlite / *.sqlite3 and their -wal / -shm / -journal sidecars,
+whenever any member of the family is open
+
+# macOS service caches (opt in with --include-system-caches)
+~/Library/Caches/com.apple.*  ~/Library/Caches/GeoServices  ~/Library/Caches/CloudKit
+
+# Never released, even with --include-system-caches
+~/Library/Caches/com.apple.e5rt.e5bundlecache   (Neural Engine compiled models)
+
+# macOS preference domains, including the ones with no com.apple. prefix
+loginwindow  .GlobalPreferences  corespotlightd  sharedfilelistd  ...
 ```
+
+### The preview matches the live run
+
+Modules overlap on purpose — the user-cache sweep, the editor-cache sweep and the container
+sweep all reach some of the same directories. A per-run claim ledger accounts for each path
+exactly once, so `--dry-run` reports the number a live run actually frees rather than a total
+inflated by every module that walked the same bytes.
+
+### Value over vanity
+
+A cache macOS rebuilds within minutes is not reclaimed space. Service caches are protected by
+default and the summary reports how many paths were skipped and why, instead of counting them
+toward a larger headline number.
 
 ### System Data clues — informational only
 
-The system module reports paths contributing to macOS "System Data" (Simulator devices, Rosetta cache, runtime volumes) but **never modifies or deletes** them, regardless of flags.
+The system module reports paths contributing to macOS "System Data" (Rosetta cache, legacy
+firmware) but **never modifies or deletes** them, regardless of flags. Docker's unused-but-tagged
+images are listed the same way — individually, with the `docker rmi` command — because a tagged
+image is something you pulled or built on purpose.
 
 ### Validation before any cleanup
 
@@ -262,6 +301,7 @@ The system module reports paths contributing to macOS "System Data" (Simulator d
 5. Path validation and deletion routing through centralized `safe_rm`
 6. Confirmation prompt before any live deletion (unless `--yes`)
 7. Extra safety prompt for `node_modules` directories over 500 MB
+8. `--dry-run` never prompts and never blocks on input — a preview declines every optional deletion
 
 ### Operation logging
 

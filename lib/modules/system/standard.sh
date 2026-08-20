@@ -83,11 +83,9 @@ system::_crash_reports() {
     local count=0
     local dir_bytes=0
     while IFS= read -r file; do
-      local fbytes
-      fbytes=$(utils::get_size_bytes "$file")
-      dir_bytes=$(( dir_bytes + fbytes ))
       (( count++ )) || true
       safe_rm "$file" "Crash report"
+      dir_bytes=$(( dir_bytes + SAFE_RM_LAST_BYTES ))
     done < <(find "$path" -maxdepth 1 \( -name "*.crash" -o -name "*.ips" -o -name "*.hang" \) -type f 2>/dev/null || true)
 
     total_count=$(( total_count + count ))
@@ -112,13 +110,15 @@ system::_ds_store() {
   local total_bytes=0
   local skipped=0
   while IFS= read -r file; do
-    local fbytes
-    fbytes=$(utils::get_size_bytes "$file")
-    total_bytes=$(( total_bytes + fbytes ))
     (( count++ )) || true
-    if ! safe_rm "$file" ".DS_Store" "silent"; then
+    # SAFE_RM_LAST_BYTES is 0 whenever the file was whitelisted, protected,
+    # unwritable or already claimed. The old add-then-subtract dance only saw
+    # a non-zero return, which safe_rm does not use for those cases.
+    safe_rm "$file" ".DS_Store" "silent"
+    if (( SAFE_RM_LAST_BYTES > 0 )); then
+      total_bytes=$(( total_bytes + SAFE_RM_LAST_BYTES ))
+    else
       (( skipped++ )) || true
-      total_bytes=$(( total_bytes - fbytes ))
     fi
   done < <(find "$HOME" \
     -name ".DS_Store" \
@@ -371,7 +371,7 @@ system::_var_folders() {
       (( size > 0 )) || continue
       log::verbose "  var/folders temp: $(utils::format_bytes "$size") ($subdir)"
       safe_rm "$target" "var/folders temp ($subdir)" "silent"
-      total=$(( total + size ))
+      total=$(( total + SAFE_RM_LAST_BYTES ))
     done < <(find /private/var/folders -maxdepth 4 -name "$subdir" -type d 2>/dev/null || true)
   done
 

@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # lib/utils.sh — Logging, colors, disk size, confirmation, dry-run handler
 
+# safe_rm is unusable without the protection policy, so guarantee it is loaded
+# even when utils.sh is sourced directly (tests, one-off scripts).
+if [[ -z "${MAC_CLEANUP_PROTECT_LOADED:-}" ]]; then
+  # shellcheck source=./protect.sh
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/protect.sh"
+fi
+
 # ── ANSI Colors (terminal-aware) ──────────────────────────────────────────────
 # Disable colors when stdout is not a TTY (piped or redirected)
 if [[ -t 1 ]]; then
@@ -95,16 +102,37 @@ log::section() {
 
 # ── Disk size utilities ───────────────────────────────────────────────────────
 
-# Get size of a path in bytes
+# Run a command with a wall-clock limit. Uses perl's alarm(), which is present
+# on every macOS install — coreutils `timeout` is not.
+# Returns 124 on timeout, mirroring GNU timeout.
+utils::run_timed() {
+  local secs="$1"
+  shift
+  if command -v perl >/dev/null 2>&1; then
+    perl -e 'alarm shift @ARGV; exec @ARGV or exit 127' "$secs" "$@"
+    return $?
+  fi
+  "$@"
+}
+
+# Get size of a path in bytes.
+#   -P  never follow symlinks (a symlinked cache must not bill its target)
+#   -x  stay on one filesystem (never walk into a mounted volume or network share)
+# A stalled network mount used to hang the whole run here, so du is time-boxed.
 utils::get_size_bytes() {
   local path="$1"
   if [[ ! -e "$path" ]]; then
     echo 0
     return 0
   fi
-  # On macOS, use 'du -sk' to get kilobytes, convert to bytes.
+
   local size
-  size=$(du -sk "$path" 2>/dev/null | awk '{print $1}')
+  size=$(utils::run_timed "${MAC_CLEANUP_DU_TIMEOUT:-20}" du -skPx "$path" 2>/dev/null | awk 'NR==1 {print $1}')
+  if [[ ! "$size" =~ ^[0-9]+$ ]]; then
+    log::verbose "size probe timed out or failed: ${path}"
+    echo 0
+    return 0
+  fi
   echo $((size * 1024))
 }
 
@@ -130,18 +158,24 @@ utils::get_free_bytes() {
   df -k / | awk 'NR==2 {print $4 * 1024}'
 }
 
-# Format bytes to human-readable (B, KB, MB, GB)
+# Format bytes to human-readable (B, KB, MB, GB, TB).
+# Pure integer arithmetic — no bc fork and no locale-sensitive float parsing,
+# which is what made this crash on hosts with comma decimal separators.
 utils::format_bytes() {
-  local bytes=$1
-  if (( bytes >= 1073741824 )); then
-    printf "%.1f GB" "$(echo "scale=1; $bytes / 1073741824" | bc)"
-  elif (( bytes >= 1048576 )); then
-    printf "%.1f MB" "$(echo "scale=1; $bytes / 1048576" | bc)"
-  elif (( bytes >= 1024 )); then
-    printf "%d KB" "$(( bytes / 1024 ))"
-  else
-    printf "%d B" "$bytes"
+  local bytes=${1:-0}
+  [[ "$bytes" =~ ^-?[0-9]+$ ]] || bytes=0
+
+  local unit div
+  if   (( bytes >= 1099511627776 )); then unit="TB"; div=1099511627776
+  elif (( bytes >= 1073741824 ));    then unit="GB"; div=1073741824
+  elif (( bytes >= 1048576 ));       then unit="MB"; div=1048576
+  elif (( bytes >= 1024 ));          then printf "%d KB" "$(( bytes / 1024 ))"; return
+  else                                    printf "%d B" "$bytes"; return
   fi
+
+  # One decimal place, rounded half-up, entirely in integer math.
+  local scaled=$(( (bytes * 10 + div / 2) / div ))
+  printf "%d.%d %s" "$(( scaled / 10 ))" "$(( scaled % 10 ))" "$unit"
 }
 
 utils::load_whitelist() {
@@ -167,6 +201,12 @@ utils::load_whitelist() {
 
 utils::is_whitelisted() {
   local path="$1"
+
+  # macOS ships bash 3.2, where "${arr[@]}" on an empty array is an unbound
+  # variable under `set -u` and aborts the run. The whitelist is empty whenever
+  # utils::load_whitelist has not run yet.
+  (( ${#WHITELIST_PATTERNS[@]} > 0 )) || return 1
+
   local pattern
   for pattern in "${WHITELIST_PATTERNS[@]}"; do
     if [[ "$path" == "$pattern" || "$path" == "${pattern}/"* ]]; then
@@ -176,15 +216,23 @@ utils::is_whitelisted() {
   return 1
 }
 
+# Retained for backwards compatibility with older module code and tests.
+# The authoritative policy now lives in lib/core/protect.sh.
 _safe_rm_check_system_path() {
-  local p="$1"
-  case "$p" in
-    /|/System|/System/*|/bin|/bin/*|/sbin|/sbin/*|/usr/bin|/usr/bin/*|/usr/sbin|/usr/sbin/*|/usr/lib|/usr/lib/*|/etc|/etc/*|/private/etc|/private/etc/*|/Library/Extensions|/Library/Extensions/*)
-      return 1
-      ;;
-  esac
+  protect::_is_system_path "$1" && return 1
   return 0
 }
+
+# Bytes the most recent safe_rm accepted; 0 when the path was protected,
+# whitelisted, already claimed by another module, or unwritable. Modules add
+# this to their scanned total instead of their own du result, which is what
+# keeps the report's Found column equal to Reclaimable.
+SAFE_RM_LAST_BYTES=0
+
+# Counters surfaced in the summary report.
+TOTAL_PROTECTED=0
+TOTAL_PROTECTED_BYTES=0
+TOTAL_DEDUPED=0
 
 safe_rm() {
   local path="$1"
@@ -194,6 +242,8 @@ safe_rm() {
   local use_sudo=false
   local use_internal=false
   local use_silent=false
+
+  SAFE_RM_LAST_BYTES=0
 
   if [[ "$options" == *"force"* ]]; then
     use_force=true
@@ -218,16 +268,6 @@ safe_rm() {
     return 1
   fi
 
-  if [[ "$path" =~ (^|/)\.\.(/|$) ]]; then
-    log::error "safe_rm: path traversal rejected: $path"
-    return 1
-  fi
-
-  if [[ "$path" == *$'\n'* ]]; then
-    log::error "safe_rm: control character rejected"
-    return 1
-  fi
-
   local resolved="$path"
   if [[ -L "$path" ]]; then
     resolved="$(utils::realpath "$path" || echo "")"
@@ -241,15 +281,24 @@ safe_rm() {
     return 0
   fi
 
-  local bytes
-  bytes=$(utils::get_size_bytes "$resolved")
-  local bytes_fmt
-  bytes_fmt=$(utils::format_bytes "$bytes")
+  # Internal bookkeeping deletions (temp files this tool created) bypass the
+  # policy and the ledger entirely — they are never user data and never counted.
+  if [[ "$use_internal" == "true" ]]; then
+    rm -rf -- "$resolved" 2>/dev/null || true
+    return 0
+  fi
 
-  if ! _safe_rm_check_system_path "$resolved"; then
-    log::warn "safe_rm: protected system path rejected: $resolved"
-    if [[ "$DRY_RUN" == "true" && "$use_internal" != "true" ]]; then
-       log::info "[DRY-RUN] ${bytes_fmt} ${label} (Skipped: System Protected)"
+  # ── Protection policy ──
+  # Runs before the size probe so a protected path costs no du walk.
+  if ! protect::verdict "$resolved"; then
+    : # eligible
+  else
+    local reason="$PROTECT_REASON"
+    TOTAL_PROTECTED=$(( TOTAL_PROTECTED + 1 ))
+    log::verbose "safe_rm: protected (${reason}): $resolved"
+    _oplog "PROTECTED" "$resolved" "$reason"
+    if [[ "$VERBOSE" == "true" ]]; then
+      log::info "  ${DIM}Protected (${reason}): ${label}${RESET}"
     fi
     return 0
   fi
@@ -257,11 +306,23 @@ safe_rm() {
   if [[ "$use_force" != "true" ]] && utils::is_whitelisted "$resolved"; then
     log::verbose "safe_rm: whitelisted path skipped: $resolved"
     _oplog "SKIPPED" "$resolved" "whitelist"
-    if [[ "$DRY_RUN" == "true" && "$use_internal" != "true" ]]; then
-       log::info "[DRY-RUN] ${bytes_fmt} ${label} (Skipped: Whitelisted)"
-    fi
+    TOTAL_PROTECTED=$(( TOTAL_PROTECTED + 1 ))
     return 0
   fi
+
+  # ── Claim ledger ──
+  # Modules overlap on purpose; the bytes must only be counted once so the
+  # dry-run preview matches what a live run can actually free.
+  if ! protect::claim "$resolved"; then
+    TOTAL_DEDUPED=$(( TOTAL_DEDUPED + 1 ))
+    log::verbose "safe_rm: already accounted for this run: $resolved"
+    return 0
+  fi
+
+  local bytes
+  bytes=$(utils::get_size_bytes "$resolved")
+  local bytes_fmt
+  bytes_fmt=$(utils::format_bytes "$bytes")
 
   if [[ "$use_sudo" != "true" ]]; then
     local parent
@@ -269,15 +330,16 @@ safe_rm() {
     if [[ ! -w "$parent" ]]; then
       log::verbose "safe_rm: non-writable path skipped: $resolved"
       _oplog "SKIPPED" "$resolved" "permission"
-      if [[ "$DRY_RUN" == "true" && "$use_internal" != "true" ]]; then
-         log::info "[DRY-RUN] ${bytes_fmt} ${label} (Skipped: Permission Denied)"
+      if [[ "$DRY_RUN" == "true" ]]; then
+        log::info "[DRY-RUN] ${bytes_fmt} ${label} (Skipped: Permission Denied)"
       fi
       return 0
     fi
   fi
 
-  if [[ "$DRY_RUN" == "true" && "$use_internal" != "true" ]]; then
+  if [[ "$DRY_RUN" == "true" ]]; then
     TOTAL_DRYRUN_BYTES=$(( TOTAL_DRYRUN_BYTES + bytes ))
+    SAFE_RM_LAST_BYTES=$bytes
     if [[ "$use_silent" != "true" ]] || [[ "$VERBOSE" == "true" ]]; then
       log::info "[DRY-RUN] ${bytes_fmt} ${label}"
     fi
@@ -305,11 +367,8 @@ safe_rm() {
     }
   fi
 
-  if [[ "$use_internal" == "true" ]]; then
-    return 0
-  fi
-
   TOTAL_FREED=$(( TOTAL_FREED + bytes ))
+  SAFE_RM_LAST_BYTES=$bytes
   if [[ "$use_silent" != "true" ]] || [[ "$VERBOSE" == "true" ]]; then
     log::success "${label} ($(utils::format_bytes "$bytes"))"
   fi
@@ -365,16 +424,14 @@ dry_run_or_exec() {
   }
 }
 
-# Returns 0 (true) if the path is safe to attempt deletion, 1 if it should be skipped
+# Returns 0 (true) if the path is safe to attempt deletion, 1 if it should be skipped.
+# This is the cheap pre-filter modules use to avoid sizing a path they can never
+# remove; safe_rm re-checks the same policy before it deletes anything.
 utils::is_deletable() {
   local target="$1"
 
-  if [[ "$target" != /* ]]; then
-    return 1
-  fi
-
-  if ! _safe_rm_check_system_path "$target"; then
-    log::verbose "Skipping protected path: ${target}"
+  if protect::verdict "$target"; then
+    log::verbose "Skipping protected path (${PROTECT_REASON}): ${target}"
     return 1
   fi
 
@@ -383,7 +440,8 @@ utils::is_deletable() {
     return 1
   fi
 
-  # Check against SIP protected list
+  local protected
+  (( ${#SIP_PROTECTED_PATHS[@]} > 0 )) || return 0
   for protected in "${SIP_PROTECTED_PATHS[@]}"; do
     if [[ "$target" == "$protected" || "$target" == "${protected}/"* ]]; then
       log::verbose "Skipping SIP-protected path: ${target}"
@@ -411,13 +469,33 @@ utils::show_operation_log() {
 }
 
 # ── Confirmation prompt ───────────────────────────────────────────────────────
+# A preview must never block on input, so dry-run answers "no" without asking.
+# Modules still report what a live run would offer to remove.
+# A non-interactive shell also declines rather than hanging a CI job forever.
 utils::confirm() {
   local message="$1"
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    log::verbose "confirm skipped in dry-run: ${message}"
+    return 1
+  fi
+
   if [[ "$SKIP_CONFIRM" == "true" ]]; then
     return 0
   fi
+
+  if [[ ! -t 0 ]] && [[ ! -r /dev/tty ]]; then
+    log::warn "Non-interactive shell — declining: ${message}"
+    return 1
+  fi
+
   printf "${YELLOW}${WARN} %s [y/N]: ${RESET}" "$message"
-  read -r response
+  local response=""
+  if [[ -t 0 ]]; then
+    read -r response
+  else
+    read -r response < /dev/tty
+  fi
   [[ "$response" =~ ^[Yy]$ ]]
 }
 

@@ -46,7 +46,7 @@ orphans::clean() {
   module_summary "Orphans" "$_ORPHAN_TOTAL"
 
   local status="clean"
-  local projected=0
+  projected=0
   if [[ "$CLEAN_ORPHANS" == "true" ]]; then
     if [[ "$DRY_RUN" == "true" ]]; then
       projected="$_ORPHAN_TOTAL"
@@ -91,6 +91,8 @@ orphans::_collect_installed_names() {
 
   local -a app_dirs=(
     "/Applications"
+    "/System/Applications"
+    "/Applications/Setapp"
     "$HOME/Applications"
   )
 
@@ -125,9 +127,19 @@ orphans::_is_recent() {
   (( age_days < ORPHAN_AGE_DAYS ))
 }
 
+# An app's helpers, extensions and XPC services get their own containers whose
+# identifiers extend the parent bundle id:
+#
+#   net.whatsapp.WhatsApp                  ← the installed app
+#   net.whatsapp.WhatsApp.ServiceExtension ← its share extension
+#
+# v0.4.x normalized the full identifier and looked for an exact line, so every
+# extension of an installed app was reported as an orphan. Walk the identifier
+# from the outside in and treat a match on any ancestor as "installed".
 orphans::_looks_installed() {
   local name="$1"
   local installed_file="$2"
+
   local normalized
   normalized=$(orphans::_normalize_name "$name")
   [[ -z "$normalized" ]] && return 0
@@ -136,7 +148,22 @@ orphans::_looks_installed() {
     return 0
   fi
 
-  if grep -q "$normalized" "$installed_file" 2>/dev/null; then
+  # Progressively strip trailing dot-components: a.b.c.d -> a.b.c -> a.b
+  local candidate="$name"
+  while [[ "$candidate" == *.* ]]; do
+    candidate="${candidate%.*}"
+    # Two components is the shortest meaningful bundle id (e.g. "io.branch").
+    [[ "$candidate" == *.* ]] || break
+    local ancestor
+    ancestor=$(orphans::_normalize_name "$candidate")
+    [[ -n "$ancestor" ]] || continue
+    if grep -Fxq "$ancestor" "$installed_file"; then
+      return 0
+    fi
+  done
+
+  # Finally allow a substring match so "Slack" matches "slackmacgap".
+  if [[ ${#normalized} -ge 5 ]] && grep -qF "$normalized" "$installed_file" 2>/dev/null; then
     return 0
   fi
 
@@ -171,6 +198,11 @@ orphans::_scan_application_support() {
         ;;
     esac
 
+    if protect::is_system_pref_domain "$name"; then
+      log::verbose "  Skipping system component: ${name}"
+      continue
+    fi
+
     orphans::_looks_installed "$name" "$installed_file" && continue
     orphans::_is_recent "$dir" && continue
     orphans::_record_candidate "$dir" "$name"
@@ -185,7 +217,14 @@ orphans::_scan_containers() {
   while IFS= read -r dir; do
     local name
     name=$(basename "$dir")
-    [[ "$name" == com.apple.* ]] && continue
+    case "$name" in
+      com.apple.* | group.com.apple.* | *.com.apple.*) continue ;;
+    esac
+
+    if protect::is_system_pref_domain "$name"; then
+      log::verbose "  Skipping system component: ${name}"
+      continue
+    fi
 
     orphans::_looks_installed "$name" "$installed_file" && continue
     orphans::_is_recent "$dir" && continue
@@ -193,6 +232,11 @@ orphans::_scan_containers() {
   done < <(find "$base" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true)
 }
 
+# Preference domains belonging to macOS itself carry no com.apple. prefix —
+# loginwindow.plist, .GlobalPreferences.plist, sharedfilelistd.plist and the
+# rest. v0.4.x offered every one of them as an orphan candidate, so
+# `--clean-orphans --yes` would delete the user's system preferences and login
+# session state. protect::is_system_pref_domain now vetoes the whole class.
 orphans::_scan_preferences() {
   local installed_file="$1"
   local base="$HOME/Library/Preferences"
@@ -201,7 +245,11 @@ orphans::_scan_preferences() {
   while IFS= read -r plist; do
     local name
     name=$(basename "$plist" .plist)
-    [[ "$name" == com.apple.* ]] && continue
+
+    if protect::is_system_pref_domain "$name"; then
+      log::verbose "  Skipping system preference domain: ${name}"
+      continue
+    fi
 
     orphans::_looks_installed "$name" "$installed_file" && continue
     orphans::_is_recent "$plist" && continue
