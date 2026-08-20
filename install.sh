@@ -44,5 +44,9 @@ else
   echo "  Add ${LOCAL_BIN} to your PATH if it is not already there."
 fi
 
-echo "✔ mac-cleanup v$(grep '^export VERSION' "${INSTALL_DIR}/lib/core.sh" | cut -d'"' -f2) installed successfully!"
+# Read the version back from the installed tree. The path moved to
+# lib/core/core.sh in the v0.4.0 refactor and this line was never updated, so
+# every install since then has printed an empty version.
+installed_version=$(grep -m1 '^VERSION=' "${INSTALL_DIR}/lib/core/core.sh" | cut -d'"' -f2)
+echo "✔ mac-cleanup v${installed_version:-unknown} installed successfully!"
 echo "  Run: mac-cleanup --help"

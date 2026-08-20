@@ -38,13 +38,16 @@ teardown() {
   [[ "$output" == *"not found"* ]]
 }
 
-@test "xcode::_derived_data: reports size and dry-run message when path exists" {
+@test "xcode::_derived_data: lists the path with its size and leaves it in place" {
   mkdir -p "$HOME/Library/Developer/Xcode/DerivedData/TestApp"
   echo "fake data" > "$HOME/Library/Developer/Xcode/DerivedData/TestApp/build.log"
   DRY_RUN=true
   run xcode::_derived_data
   [ "$status" -eq 0 ]
-  [[ "$output" == *"DRY-RUN"* ]]
+  # One line per path, "<size>  <label>" — the old output repeated every path
+  # as both a module line and a separate "[DRY-RUN] ..." line.
+  [[ "$output" == *"KB"*"Xcode DerivedData"* ]]
+  [ -d "$HOME/Library/Developer/Xcode/DerivedData/TestApp" ]
 }
 
 @test "xcode::_archives: skips when Archives does not exist" {

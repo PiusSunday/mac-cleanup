@@ -52,5 +52,9 @@ brew::clean() {
   if (( brew_cache_size > 0 )); then
     status="$brew_cache_size"
   fi
-  utils::register_module "Homebrew" "Caches & Logs" "$brew_cache_size" "$freed" "$status" "$projected"
+  # brew cleans through its own CLI rather than safe_rm, so the claim ledger
+  # cannot count items for it; report the cache as the single item it is.
+  local items=0
+  (( brew_cache_size > 0 )) && items=1
+  utils::register_module "Homebrew" "Caches & Logs" "$brew_cache_size" "$freed" "$status" "$projected" "$items"
 }

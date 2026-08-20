@@ -83,8 +83,9 @@ system::_crash_reports() {
     local count=0
     local dir_bytes=0
     while IFS= read -r file; do
+      safe_rm "$file" "Crash report: $(basename "$file")" "silent"
+      (( SAFE_RM_LAST_BYTES > 0 )) || continue
       (( count++ )) || true
-      safe_rm "$file" "Crash report"
       dir_bytes=$(( dir_bytes + SAFE_RM_LAST_BYTES ))
     done < <(find "$path" -maxdepth 1 \( -name "*.crash" -o -name "*.ips" -o -name "*.hang" \) -type f 2>/dev/null || true)
 
@@ -94,7 +95,9 @@ system::_crash_reports() {
 
   _SYS_CRASH_TOTAL=$total_bytes
 
-  if (( total_count > 0 )); then
+  if (( total_count == 1 )); then
+    log::info "Crash reports: 1 file ($(utils::format_bytes "$total_bytes"))"
+  elif (( total_count > 1 )); then
     log::info "Crash reports: ${total_count} files ($(utils::format_bytes "$total_bytes"))"
   else
     log::info "Crash reports: none found."
@@ -135,7 +138,7 @@ system::_ds_store() {
     local msg
     if (( skipped > 0 )); then
       local deleted=$(( count - skipped ))
-      msg=".DS_Store: ${deleted} of ${count} files deleted ($(utils::format_bytes "$total_bytes")) — ${skipped} skipped (permission denied)"
+      msg=".DS_Store: ${deleted} of ${count} files ($(utils::format_bytes "$total_bytes")) — ${skipped} skipped (protected or unwritable)"
     else
       msg=".DS_Store: ${count} files ($(utils::format_bytes "$total_bytes"))"
     fi
@@ -243,7 +246,6 @@ system::_dev_tool_caches() {
     local npm_bytes
     npm_bytes=$(utils::get_size_bytes "$npm_cache")
     _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + npm_bytes ))
-    log::info "npm cache: $(utils::format_bytes "$npm_bytes")"
     safe_rm "$npm_cache" "npm cache"
   else
     log::verbose "npm cache not found — skipping."
@@ -256,8 +258,7 @@ system::_dev_tool_caches() {
     npx_bytes=$(utils::get_size_bytes "$npx_cache")
     if (( npx_bytes > 0 )); then
       _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + npx_bytes ))
-      log::info "npm npx cache: $(utils::format_bytes "$npx_bytes")"
-      safe_rm "$npx_cache" "npm npx cache"
+        safe_rm "$npx_cache" "npm npx cache"
     fi
   fi
 
@@ -268,8 +269,7 @@ system::_dev_tool_caches() {
     npm_logs_bytes=$(utils::get_size_bytes "$npm_logs")
     if (( npm_logs_bytes > 0 )); then
       _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + npm_logs_bytes ))
-      log::info "npm logs: $(utils::format_bytes "$npm_logs_bytes")"
-      safe_rm "$npm_logs" "npm logs"
+        safe_rm "$npm_logs" "npm logs"
     fi
   fi
 
@@ -279,7 +279,6 @@ system::_dev_tool_caches() {
     local pip_bytes
     pip_bytes=$(utils::get_size_bytes "$pip_cache")
     _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + pip_bytes ))
-    log::info "pip cache: $(utils::format_bytes "$pip_bytes")"
     safe_rm "$pip_cache" "pip cache"
   else
     log::verbose "pip cache not found — skipping."
@@ -307,8 +306,7 @@ system::_dev_tool_caches() {
     gcloud_logs_bytes=$(utils::get_size_bytes "$gcloud_logs")
     if (( gcloud_logs_bytes > 0 )); then
       _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + gcloud_logs_bytes ))
-      log::info "Google Cloud logs: $(utils::format_bytes "$gcloud_logs_bytes")"
-      safe_rm "$gcloud_logs" "Google Cloud logs"
+        safe_rm "$gcloud_logs" "Google Cloud logs"
     fi
   fi
 
@@ -319,8 +317,7 @@ system::_dev_tool_caches() {
     gcloud_cache_bytes=$(utils::get_size_bytes "$gcloud_cache")
     if (( gcloud_cache_bytes > 0 )); then
       _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + gcloud_cache_bytes ))
-      log::info "Google Cloud cache: $(utils::format_bytes "$gcloud_cache_bytes")"
-      safe_rm "$gcloud_cache" "Google Cloud cache"
+        safe_rm "$gcloud_cache" "Google Cloud cache"
     fi
   fi
 
@@ -331,8 +328,7 @@ system::_dev_tool_caches() {
     kube_bytes=$(utils::get_size_bytes "$kube_cache")
     if (( kube_bytes > 0 )); then
       _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + kube_bytes ))
-      log::info "Kubernetes cache: $(utils::format_bytes "$kube_bytes")"
-      safe_rm "$kube_cache" "Kubernetes cache"
+        safe_rm "$kube_cache" "Kubernetes cache"
     fi
   fi
 
@@ -343,8 +339,7 @@ system::_dev_tool_caches() {
     aws_bytes=$(utils::get_size_bytes "$aws_cache")
     if (( aws_bytes > 0 )); then
       _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + aws_bytes ))
-      log::info "AWS CLI cache: $(utils::format_bytes "$aws_bytes")"
-      safe_rm "$aws_cache" "AWS CLI cache"
+        safe_rm "$aws_cache" "AWS CLI cache"
     fi
   fi
 }

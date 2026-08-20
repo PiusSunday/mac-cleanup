@@ -290,136 +290,204 @@ print_report() {
   local disk_before="$2"
   local disk_after="$3"
 
-  local mode_label="LIVE"
-  if [[ "$DRY_RUN" == "true" ]]; then
-    mode_label="DRY-RUN"
-  fi
+  local mode_label="live run"
+  [[ "$DRY_RUN" == "true" ]] && mode_label="dry run"
 
   local bar
   bar=$(printf '━%.0s' $(seq 1 76))
 
-  # ── Header ──
   printf '\n%s%s%s%s\n' "${BOLD}" "${BLUE}" "$bar" "${RESET}"
-  printf '%s  🧹 mac-cleanup — Summary Report%s\n' "${BOLD}" "${RESET}"
-  printf '%s%s%s%s\n' "${BOLD}" "${BLUE}" "$bar" "${RESET}"
-  printf '  Mode: %s%s%s  |  Duration: %ss\n\n' \
-    "${CYAN}" "$mode_label" "${RESET}" "$duration"
+  printf '  %s🧹 mac-cleanup v%s%s  %s·  %s  ·  %s%s\n' \
+    "${BOLD}" "$VERSION" "${RESET}" "${DIM}" "$mode_label" "$(report::_duration "$duration")" "${RESET}"
+  printf '%s%s%s%s\n\n' "${BOLD}" "${BLUE}" "$bar" "${RESET}"
 
-  # ── Column headers ──
-  local separator
-  separator=$(printf '─%.0s' $(seq 1 76))
-  printf '  %s%-18s %-22s %10s %13s   %s%s\n' \
-    "${BOLD}" "Category" "Module" "Found" "Reclaimable" "Status" "${RESET}"
-  printf '  %s\n' "$separator"
-
-  # ── Per-module rows ──
-  local total_scanned=0
-  local total_projected=0
-  local module_count=${#MODULE_NAMES[@]}
-
+  # Tolerate the array being entirely unset, not merely empty: under `set -u`
+  # bash aborts on an unset name, and a caller that sources the libs from inside
+  # a function scopes the `declare -a` there rather than globally.
+  local module_count=0
+  [[ -n "${MODULE_NAMES+x}" ]] && module_count=${#MODULE_NAMES[@]}
   if (( module_count == 0 )); then
-    printf '  %s(no modules ran)%s\n' "${DIM}" "${RESET}"
-  else
-    local prev_category=""
-    for (( i=0; i<module_count; i++ )); do
-      local name="${MODULE_NAMES[$i]}"
-      local category="${MODULE_CATEGORIES[$i]}"
-      local scanned="${MODULE_SCANNED[$i]}"
-      local status="${MODULE_STATUS[$i]}"
-      local projected="${MODULE_PROJECTED[$i]:-0}"
-
-      total_scanned=$(( total_scanned + scanned ))
-      total_projected=$(( total_projected + projected ))
-
-      local cat_display=""
-      if [[ "$category" != "$prev_category" ]]; then
-        cat_display="$category"
-        prev_category="$category"
-      fi
-
-      local found_fmt="-"
-      if (( scanned > 0 )); then
-        found_fmt=$(utils::format_bytes "$scanned")
-      fi
-
-      local reclaimable_fmt="-"
-      if (( projected > 0 )); then
-        reclaimable_fmt=$(utils::format_bytes "$projected")
-      elif [[ "$status" == "review" ]]; then
-        reclaimable_fmt="0 B"
-      fi
-
-      local status_fmt="${GREEN}Clean${RESET}"
-      case "$status" in
-        skipped)
-          status_fmt="${YELLOW}Skipped${RESET}"
-          ;;
-        review)
-          status_fmt="${CYAN}Needs review${RESET}"
-          ;;
-        done)
-          status_fmt="${GREEN}✔ Done${RESET}"
-          ;;
-        Pending|pending)
-          status_fmt="${YELLOW}Pending${RESET}"
-          ;;
-      esac
-
-      printf '  %-18s %-22s %10s %13s   %s\n' \
-        "$cat_display" "$name" "$found_fmt" "$reclaimable_fmt" "$status_fmt"
-    done
+    printf '  %s(no modules ran)%s\n\n' "${DIM}" "${RESET}"
+    return 0
   fi
 
-  # ── Total row ──
-  printf '  %s\n' "$separator"
+  # Rank by what each module can actually reclaim. Category grouping put the
+  # System module first regardless of size; the number the user acts on is the
+  # size, so that decides the order.
+  local ranked
+  ranked=$(report::_ranked_rows)
 
-  local total_found_fmt total_reclaimable_fmt
-  total_found_fmt=$(utils::format_bytes "$total_scanned")
-  total_reclaimable_fmt=$(utils::format_bytes "$total_projected")
+  local total_bytes=0 total_items=0 max_bytes=0
+  local -a clean_modules=() review_modules=() skipped_modules=()
 
-  printf '  %s%-18s %-22s %10s %13s   %s%s\n' \
-    "${BOLD}" "TOTALS" "" "$total_found_fmt" "$total_reclaimable_fmt" "" "${RESET}"
+  local i
+  for (( i=0; i<module_count; i++ )); do
+    local projected="${MODULE_PROJECTED[$i]:-0}"
+    [[ "$projected" =~ ^[0-9]+$ ]] || projected=0
+    total_bytes=$(( total_bytes + projected ))
+    total_items=$(( total_items + ${MODULE_ITEMS[$i]:-0} ))
+    (( projected > max_bytes )) && max_bytes=$projected
+
+    if (( projected == 0 )); then
+      case "${MODULE_STATUS[$i]}" in
+        review)  review_modules+=("${MODULE_NAMES[$i]}") ;;
+        skipped) skipped_modules+=("${MODULE_NAMES[$i]}") ;;
+        *)       clean_modules+=("${MODULE_NAMES[$i]}") ;;
+      esac
+    fi
+  done
+
+  # ── Ranked table ──
+  printf '  %s%-22s %12s %7s%s\n' "${BOLD}" "MODULE" "RECLAIMABLE" "ITEMS" "${RESET}"
+
+  local row
+  while IFS='|' read -r _sortkey name projected items; do
+    [[ -n "$name" ]] || continue
+    local items_fmt="$items"
+    # A module that cleans through its own tool (brew, docker) queues no paths,
+    # so "0" beside a real size reads as a contradiction rather than "unknown".
+    (( items == 0 )) && items_fmt="—"
+    printf '  %-22s %12s %7s  %s\n' \
+      "$name" "$(utils::format_bytes "$projected")" "$items_fmt" \
+      "$(report::_bar "$projected" "$max_bytes")"
+  done <<< "$ranked"
+
+  local rule
+  rule=$(printf '─%.0s' $(seq 1 74))
+  printf '  %s\n' "$rule"
+  printf '  %s%-22s %12s %7s%s\n' \
+    "${BOLD}" "Total" "$(utils::format_bytes "$total_bytes")" "$total_items" "${RESET}"
+
+  # ── Modules with nothing to do ──
+  printf '\n'
+  if (( ${#clean_modules[@]} > 0 )); then
+    printf '  %sAlready clean%s   %s\n' "${DIM}" "${RESET}" "$(report::_join "${clean_modules[@]}")"
+  fi
+  if (( ${#review_modules[@]} > 0 )); then
+    printf '  %sNeeds review%s    %s\n' "${DIM}" "${RESET}" "$(report::_join "${review_modules[@]}")"
+  fi
+  if (( ${#skipped_modules[@]} > 0 )); then
+    printf '  %sUnavailable%s     %s\n' "${DIM}" "${RESET}" "$(report::_join "${skipped_modules[@]}")"
+  fi
+  if (( TOTAL_PROTECTED > 0 )) || (( TOTAL_DEDUPED > 0 )); then
+    local skip_note="${TOTAL_PROTECTED} paths protected by policy"
+    (( TOTAL_DEDUPED > 0 )) && skip_note="${skip_note}, ${TOTAL_DEDUPED} counted by another module"
+    if [[ "$VERBOSE" != "true" ]]; then
+      skip_note="${skip_note}  ${DIM}(--verbose to list)${RESET}"
+    fi
+    printf '  %sSkipped%s         %s\n' "${DIM}" "${RESET}" "$skip_note"
+  fi
+
+  # ── Opt-in wins ──
+  report::_actions
 
   # ── Footer ──
   printf '\n'
-  local free_before_fmt free_after_fmt
+  local free_before_fmt
   free_before_fmt=$(utils::format_bytes "$disk_before")
-  free_after_fmt=$(utils::format_bytes "$disk_after")
-
   if [[ "$DRY_RUN" == "true" ]]; then
-    local projected=$(( disk_before + total_projected ))
-    local projected_fmt
-    projected_fmt=$(utils::format_bytes "$projected")
-    printf '  Free space:  %s → %s (projected)\n' "$free_before_fmt" "$projected_fmt"
+    printf '  %sDisk%s            %s free  →  %s after cleanup\n' \
+      "${DIM}" "${RESET}" "$free_before_fmt" "$(utils::format_bytes "$(( disk_before + total_bytes ))")"
   else
-    printf '  Free space:  %s → %s\n' "$free_before_fmt" "$free_after_fmt"
+    printf '  %sDisk%s            %s free  →  %s free\n' \
+      "${DIM}" "${RESET}" "$free_before_fmt" "$(utils::format_bytes "$disk_after")"
   fi
+  local tilde='~'
+  printf '  %sLog%s             %s\n' "${DIM}" "${RESET}" "${LOG_FILE/#$HOME/$tilde}"
 
-  if (( TOTAL_PROTECTED > 0 )) || (( TOTAL_DEDUPED > 0 )); then
-    printf '  Skipped:     %s protected by policy' "$TOTAL_PROTECTED"
-    if (( TOTAL_DEDUPED > 0 )); then
-      printf ', %s already counted by another module' "$TOTAL_DEDUPED"
-    fi
-    printf '\n'
-    if [[ "$VERBOSE" != "true" ]]; then
-      printf '               %s(re-run with --verbose to list them)%s\n' "${DIM}" "${RESET}"
-    fi
-  fi
-  printf '  Log saved:   %s\n' "$LOG_FILE"
   printf '\n'
-  printf '  %sStatus legend:%s\n' "${BOLD}" "${RESET}"
   if [[ "$DRY_RUN" == "true" ]]; then
-    printf '  - Pending: module has items that will be deleted in a live run.\n'
-    printf '  - Clean: module was already clean (nothing found).\n'
+    if (( total_bytes > 0 )); then
+      printf '  %sThis was a preview. Re-run without --dry-run to reclaim %s.%s\n' \
+        "${BOLD}" "$(utils::format_bytes "$total_bytes")" "${RESET}"
+    else
+      printf '  %sNothing to reclaim — this Mac is already clean.%s\n' "${BOLD}" "${RESET}"
+    fi
   else
-    printf '  - ✔ Done: module was cleaned successfully.\n'
-    printf '  - Clean: module was already clean (nothing found).\n'
+    printf '  %s%sReclaimed %s.%s\n' "${BOLD}" "${GREEN}" "$(utils::format_bytes "$total_bytes")" "${RESET}"
   fi
-  printf '  - Needs review: requires manual action or specific flags (e.g. --clean-orphans).\n'
-  printf '  - Skipped: prerequisite unavailable.\n'
   printf '%s%s%s%s\n\n' "${BOLD}" "${BLUE}" "$bar" "${RESET}"
+}
 
-  log::success "Run complete."
+# Emit "sortkey|name|projected|items" per module with something to reclaim,
+# largest first. Zero-byte modules are summarised on one line instead of taking
+# a row each. sort -rn keys on the zero-padded byte count.
+report::_ranked_rows() {
+  [[ -n "${MODULE_NAMES+x}" ]] || return 0
+  local i
+  for (( i=0; i<${#MODULE_NAMES[@]}; i++ )); do
+    local projected="${MODULE_PROJECTED[$i]:-0}"
+    [[ "$projected" =~ ^[0-9]+$ ]] || projected=0
+    (( projected > 0 )) || continue
+    printf '%020d|%s|%s|%s\n' \
+      "$projected" "${MODULE_NAMES[$i]}" "$projected" "${MODULE_ITEMS[$i]:-0}"
+  done | sort -rn
+}
+
+# Proportional bar. Only relative size matters, so the largest module fills the
+# width and everything else scales against it; anything non-zero gets at least a
+# sliver so "small but present" never renders as "absent".
+report::_bar() {
+  local bytes="$1"
+  local max="$2"
+  local width=26
+
+  (( bytes > 0 && max > 0 )) || return 0
+
+  local filled=$(( bytes * width / max ))
+  if (( filled < 1 )); then
+    printf '%s▏%s' "${DIM}" "${RESET}"
+    return 0
+  fi
+
+  local out=""
+  local n
+  for (( n=0; n<filled; n++ )); do out="${out}█"; done
+  printf '%s%s%s' "${CYAN}" "$out" "${RESET}"
+}
+
+report::_join() {
+  local out=""
+  local item
+  for item in "$@"; do
+    [[ -n "$out" ]] && out="${out}, "
+    out="${out}${item}"
+  done
+  printf '%s' "$out"
+}
+
+report::_duration() {
+  local secs="${1:-0}"
+  if (( secs < 60 )); then
+    printf '%ss' "$secs"
+  else
+    printf '%dm %02ds' "$(( secs / 60 ))" "$(( secs % 60 ))"
+  fi
+}
+
+# Everything found but deliberately not removed, with the command that would
+# remove it. These are the largest numbers on most machines and used to be
+# buried in the scroll-back.
+report::_actions() {
+  [[ -n "${ACTION_LABELS+x}" ]] || return 0
+  local count=${#ACTION_LABELS[@]}
+  (( count > 0 )) || return 0
+
+  printf '\n  %s%sNEEDS YOUR DECISION%s\n' "${BOLD}" "${YELLOW}" "${RESET}"
+
+  local ordered
+  ordered=$(
+    local i
+    for (( i=0; i<count; i++ )); do
+      printf '%020d|%s|%s\n' "${ACTION_BYTES[$i]}" "${ACTION_LABELS[$i]}" "${ACTION_COMMANDS[$i]}"
+    done | sort -rn
+  )
+
+  while IFS='|' read -r bytes label command; do
+    [[ -n "$label" ]] || continue
+    printf '  %s%10s%s   %s\n' "${BOLD}" "$(utils::format_bytes "$((10#$bytes))")" "${RESET}" "$label"
+    [[ -n "$command" ]] && printf '               %s%s%s\n' "${CYAN}" "$command" "${RESET}"
+  done <<< "$ordered"
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────

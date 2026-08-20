@@ -140,66 +140,75 @@ mac-cleanup --version
 
 ### Expected output
 
-```yaml
-🧹 mac-cleanup vX.Y.Z
+```text
+🧹 mac-cleanup v0.5.0
 ⚠  DRY-RUN mode — no files will be deleted
 
-  Apple Silicon  |  macOS XX.X  |  Free: 331 GB  |  User mode
+  Apple Silicon  |  macOS 26.5  |  Free: 203.4 GB  |  User mode
 
 ▶ System
 ━━━ System Scan ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ℹ Crash reports: 3 files (412 KB)
-ℹ .DS_Store: 47 files (188 KB)
-ℹ Trash: 1.2 GB
-...
-✔   System → 1.2 GB reclaimable
+ℹ Crash reports: 1 file (356 KB)
+ℹ .DS_Store: 3 of 9 files (32 KB) — 6 skipped (protected or unwritable)
+       21.6 MB  npm cache
+       36.0 MB  npm npx cache
+✔   System → 58.0 MB reclaimable
+
+━━━ Deep System Cleanup ━━━━━━━━━━━━━━━━━━━━━━━━━━
+ℹ Private tmp: 204 files (2.7 MB)
+✔   Deep System → 2.7 MB reclaimable
 
 ▶ Developer Tools
 ━━━ Xcode ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ℹ DerivedData: 42.3 GB
-...
-✔   Xcode → 42.3 GB reclaimable
+ℹ   Superseded runtime: iphonesimulator 26.4 (7.9 GB)
+⚠   3 superseded runtime(s) found — not removed without --simulators.
 
-━━━ Docker ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-⚠ Docker daemon is not running. Skipping.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  🧹 mac-cleanup v0.5.0  ·  dry run  ·  1m 54s
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-▶ Caches & Logs
-━━━ Caches ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-...
+  MODULE                  RECLAIMABLE   ITEMS
+  Dev Artifacts                1.1 GB      25  ██████████████████████████
+  System                      58.0 MB       7  █
+  Homebrew                    36.7 MB       1  ▏
+  Caches                      12.6 MB      30  ▏
+  Browsers                     5.6 MB       1  ▏
+  Deep System                  2.7 MB     204  ▏
+  Xcode                        580 KB       2  ▏
+  ──────────────────────────────────────────────────────────────────────────
+  Total                        1.3 GB     270
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  🧹 mac-cleanup — Summary Report
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Mode: DRY-RUN  |  Duration: 3s
+  Already clean   Apps & Containers, Mail, Snapshots
+  Needs review    Orphans, Docker
+  Skipped         6 paths protected by policy, 4 counted by another module
 
-  Category           Module                      Found   Reclaimable   Status
-  ─────────────────────────────────────────────────────────────────────────────
-  System             System                     1.2 GB        1.2 GB   Clean
-                     Deep System                     -             -   Clean
-                     Orphans                         -             -   Clean
-  Developer Tools    Xcode                     42.3 GB       42.3 GB   Clean
-                     Docker                          -             -   Skipped
-                     Dev Artifacts             73.6 MB       73.6 MB   Clean
-  Caches & Logs      Caches                   345.5 MB      345.5 MB   Clean
-                     Homebrew                  53.2 MB       53.2 MB   Clean
-  Storage Management Snapshots                       -             -   Clean
-  ─────────────────────────────────────────────────────────────────────────────
-  TOTALS                                       43.8 GB       43.8 GB
+  NEEDS YOUR DECISION
+     23.6 GB   3 superseded Xcode simulator runtimes
+               mac-cleanup --simulators
+     14.9 GB   16 unused Docker images (listed above)
+               docker rmi <name>
+     34.4 MB   18 stale app containers and preference files
+               mac-cleanup --clean-orphans
 
-  Free space:  331 GB → 374.8 GB (projected)
-  Log saved:   ~/.mac-cleanup/cleanup.log
+  Disk            203.4 GB free  →  204.7 GB after cleanup
+  Log             ~/.mac-cleanup/cleanup.log
 
-  Status legend:
-  - Needs review: found items are excluded from projected reclaimable bytes.
-  - Clean: module will be cleaned automatically in a real run.
-  - ✔ Done: module was cleaned successfully.
-  - Skipped: prerequisite unavailable.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-✔ Run complete.
+  This was a preview. Re-run without --dry-run to reclaim 1.3 GB.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-`Found` is what each module detected. `Reclaimable` is what the current run would remove, or project to remove in dry-run mode. `Status` explains whether the module will run automatically, is waiting on user action, or was skipped.
+Modules are ranked by what they can reclaim, largest first, so the biggest win is
+always the top row. `ITEMS` is how many paths the module queued — a module that
+cleans through its own CLI, like Homebrew, shows `—` rather than a misleading `0`.
+
+**NEEDS YOUR DECISION** is the part worth reading. It collects everything the tool
+found but will not remove on its own, each with the command that would remove it.
+On the machine above that is 38.5 GB — far more than the 1.3 GB of automatic
+cleanup — and none of it is touched without an explicit flag.
+
+Every path that will be deleted is printed. Bulk age-gated sweeps (rotated logs,
+`.DS_Store`, temp files) are rolled up into one line by default; `--verbose` lists
+each one individually. Nothing is ever truncated.
 
 ---
 

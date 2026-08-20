@@ -32,6 +32,12 @@ orphans::clean() {
     orphans::_delete_confirmed_candidates
   else
     log::warn "Orphans are report-only by default. Run with --clean-orphans to delete them."
+    if (( _ORPHAN_TOTAL > 0 )); then
+      utils::register_action \
+        "${#ORPHAN_CANDIDATES[@]} stale app containers and preference files" \
+        "$_ORPHAN_TOTAL" \
+        "mac-cleanup --clean-orphans"
+    fi
   fi
 
   local freed=$(( TOTAL_FREED - freed_before ))
@@ -63,13 +69,20 @@ orphans::clean() {
   utils::register_module "Orphans" "System" "$_ORPHAN_TOTAL" "$freed" "$status" "$projected"
 }
 
+# `tr -cd '[:alnum:]'` strips the trailing newline along with the punctuation.
+# Because every name was appended without one, the installed-apps file ended up
+# as a single concatenated line: `sort -u` had nothing to dedupe and the exact
+# `grep -Fxq` lookup could never match. Detection silently fell back to a loose
+# substring search, which is what produced the false positives.
 orphans::_normalize_name() {
   local name="$1"
   name="${name#com.}"
   name="${name#org.}"
   name="${name#net.}"
   name="${name#io.}"
-  echo "$name" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]'
+  local normalized
+  normalized=$(printf '%s' "$name" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]')
+  printf '%s\n' "$normalized"
 }
 
 orphans::_collect_installed_names() {
@@ -180,7 +193,9 @@ orphans::_record_candidate() {
 
   _ORPHAN_TOTAL=$(( _ORPHAN_TOTAL + size ))
   ORPHAN_CANDIDATES+=("$path|$name|$size")
-  log::warn "Orphan candidate: ${name} ($(utils::format_bytes "$size"))"
+  # Rendered like every other finding rather than as a warning: these are
+  # candidates for review, not problems.
+  log::item "$size" "$name"
 }
 
 orphans::_scan_application_support() {
