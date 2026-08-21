@@ -30,6 +30,9 @@ snapshots::clean() {
     return 0
   fi
 
+  local count
+  count=$(printf '%s\n' "$snapshots" | grep -c . || true)
+
   snapshots::list
   dry_run_or_exec tmutil deletelocalsnapshots /
   snapshots::_in_progress
@@ -43,16 +46,29 @@ snapshots::clean() {
     projected="$freed"
   fi
 
-  module_summary "Snapshots" "$freed"
-
-  local status
-  if (( freed > 0 )); then
-    status="$freed"
+  # tmutil does not report how much a snapshot occupies, and the deletion runs
+  # through the daemon rather than safe_rm, so there are no bytes to attribute
+  # in either mode. Reporting on $freed made a preview announce "Nothing to
+  # clean" while listing real snapshots — the same defect as the Trash gate.
+  # Report the count and let the decisions block carry it.
+  if (( count > 0 )); then
+    log::success "  Snapshots → ${count} local snapshot(s)"
   else
-    status="clean"
+    module_summary "Snapshots" "$projected"
   fi
 
-  utils::register_module "Snapshots" "Storage Management" "0" "$freed" "$status" "$projected"
+  local status="clean"
+  if (( projected > 0 )); then
+    status="$projected"
+  elif (( count > 0 )); then
+    status="review"
+    utils::register_action \
+      "${count} local Time Machine snapshot(s) — size not reported by macOS" \
+      "0" \
+      "mac-cleanup --snapshots"
+  fi
+
+  utils::register_module "Snapshots" "Storage Management" "$projected" "$freed" "$status" "$projected"
 }
 
 # List local snapshots with timestamps
