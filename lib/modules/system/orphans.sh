@@ -32,6 +32,12 @@ orphans::clean() {
     orphans::_delete_confirmed_candidates
   else
     log::warn "Orphans are report-only by default. Run with --clean-orphans to delete them."
+    if (( _ORPHAN_TOTAL > 0 )); then
+      utils::register_action \
+        "${#ORPHAN_CANDIDATES[@]} stale app containers and preference files" \
+        "$_ORPHAN_TOTAL" \
+        "mac-cleanup --clean-orphans"
+    fi
   fi
 
   local freed=$(( TOTAL_FREED - freed_before ))
@@ -46,7 +52,7 @@ orphans::clean() {
   module_summary "Orphans" "$_ORPHAN_TOTAL"
 
   local status="clean"
-  local projected=0
+  projected=0
   if [[ "$CLEAN_ORPHANS" == "true" ]]; then
     if [[ "$DRY_RUN" == "true" ]]; then
       projected="$_ORPHAN_TOTAL"
@@ -63,13 +69,20 @@ orphans::clean() {
   utils::register_module "Orphans" "System" "$_ORPHAN_TOTAL" "$freed" "$status" "$projected"
 }
 
+# `tr -cd '[:alnum:]'` strips the trailing newline along with the punctuation.
+# Because every name was appended without one, the installed-apps file ended up
+# as a single concatenated line: `sort -u` had nothing to dedupe and the exact
+# `grep -Fxq` lookup could never match. Detection silently fell back to a loose
+# substring search, which is what produced the false positives.
 orphans::_normalize_name() {
   local name="$1"
   name="${name#com.}"
   name="${name#org.}"
   name="${name#net.}"
   name="${name#io.}"
-  echo "$name" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]'
+  local normalized
+  normalized=$(printf '%s' "$name" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]')
+  printf '%s\n' "$normalized"
 }
 
 orphans::_collect_installed_names() {
@@ -91,6 +104,8 @@ orphans::_collect_installed_names() {
 
   local -a app_dirs=(
     "/Applications"
+    "/System/Applications"
+    "/Applications/Setapp"
     "$HOME/Applications"
   )
 
@@ -125,9 +140,19 @@ orphans::_is_recent() {
   (( age_days < ORPHAN_AGE_DAYS ))
 }
 
+# An app's helpers, extensions and XPC services get their own containers whose
+# identifiers extend the parent bundle id:
+#
+#   net.whatsapp.WhatsApp                  ← the installed app
+#   net.whatsapp.WhatsApp.ServiceExtension ← its share extension
+#
+# v0.4.x normalized the full identifier and looked for an exact line, so every
+# extension of an installed app was reported as an orphan. Walk the identifier
+# from the outside in and treat a match on any ancestor as "installed".
 orphans::_looks_installed() {
   local name="$1"
   local installed_file="$2"
+
   local normalized
   normalized=$(orphans::_normalize_name "$name")
   [[ -z "$normalized" ]] && return 0
@@ -136,9 +161,142 @@ orphans::_looks_installed() {
     return 0
   fi
 
-  if grep -q "$normalized" "$installed_file" 2>/dev/null; then
+  # Progressively strip trailing dot-components: a.b.c.d -> a.b.c -> a.b
+  local candidate="$name"
+  while [[ "$candidate" == *.* ]]; do
+    candidate="${candidate%.*}"
+    # Two components is the shortest meaningful bundle id (e.g. "io.branch").
+    [[ "$candidate" == *.* ]] || break
+    local ancestor
+    ancestor=$(orphans::_normalize_name "$candidate")
+    [[ -n "$ancestor" ]] || continue
+    if grep -Fxq "$ancestor" "$installed_file"; then
+      return 0
+    fi
+  done
+
+  # Finally allow a substring match so "Slack" matches "slackmacgap".
+  if [[ ${#normalized} -ge 5 ]] && grep -qF "$normalized" "$installed_file" 2>/dev/null; then
     return 0
   fi
+
+  return 1
+}
+
+# Is the app that owns this identifier running right now?
+#
+# `firestore` is Arc's local database. Arc was running and actively writing to
+# it, and the orphan scan still offered all 40.5 MB for deletion.
+orphans::_owner_is_running() {
+  local name="$1"
+  [[ -n "$name" ]] || return 1
+
+  if pgrep -xi "$name" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Bundle-id form: try each trailing component, longest first.
+  local candidate="$name"
+  while [[ "$candidate" == *.* ]]; do
+    local leaf="${candidate##*.}"
+    if [[ ${#leaf} -ge 4 ]] && pgrep -xi "$leaf" >/dev/null 2>&1; then
+      return 0
+    fi
+    candidate="${candidate%.*}"
+  done
+  return 1
+}
+
+# Derive owner names from what is *inside* a directory.
+#
+# A generic top-level name says nothing about ownership: "firestore" holds
+# firestore/Arc/bcny-arc-server, so the owner is Arc. Attributing by the
+# top-level name alone is what made a running browser's database look orphaned.
+orphans::_inner_owners() {
+  local dir="$1"
+  local entry
+  # Two levels reaches vendor/product layouts like firestore/Arc/bcny-arc-server.
+  while IFS= read -r entry; do
+    [[ -n "$entry" ]] || continue
+    basename "$entry"
+  done < <(find "$dir" -mindepth 1 -maxdepth 2 -type d 2>/dev/null | head -40)
+}
+
+# A vendor prefix shared with an installed bundle means the same publisher.
+#
+# zoom.us is installed as us.zoom.xos, so us.zoom.updater and
+# us.zoom.updater.config belong to software that is present. An exact-name
+# lookup misses that entirely.
+orphans::_vendor_is_installed() {
+  local name="$1"
+  local installed_file="$2"
+
+  # Needs vendor + product to be meaningful; "com" alone is not.
+  [[ "$name" == *.*.* ]] || return 1
+
+  local vendor="${name%.*}"
+  while [[ "$vendor" == *.* ]]; do
+    local normalized
+    normalized=$(orphans::_normalize_name "$vendor")
+    if [[ ${#normalized} -ge 5 ]] && grep -qF "$normalized" "$installed_file" 2>/dev/null; then
+      return 0
+    fi
+    vendor="${vendor%.*}"
+  done
+  return 1
+}
+
+# Only propose things that actually look like an application's data.
+#
+# ~/Library/Application Support is shared by apps and by command line tools.
+# go/, pypoetry/, virtualenv/ and iCloud/ are live tool state with no bundle and
+# no app to uninstall, so they can never be the orphan of a removed app.
+orphans::_looks_like_app_data() {
+  local name="$1"
+  local installed_file="$2"
+
+  # A reverse-DNS identifier, e.g. com.openai.chat
+  [[ "$name" == *.*.* ]] && return 0
+
+  # Or a name matching something that was installed at some point.
+  local normalized
+  normalized=$(orphans::_normalize_name "$name")
+  if [[ ${#normalized} -ge 4 ]] && grep -qF "$normalized" "$installed_file" 2>/dev/null; then
+    return 0
+  fi
+
+  return 1
+}
+
+# Everything that must be false before a path is offered for deletion.
+orphans::_is_claimed_by_live_software() {
+  local dir="$1"
+  local name="$2"
+  local installed_file="$3"
+
+  if orphans::_owner_is_running "$name"; then
+    log::verbose "  Keeping ${name}: its process is running"
+    return 0
+  fi
+
+  if orphans::_vendor_is_installed "$name" "$installed_file"; then
+    log::verbose "  Keeping ${name}: same publisher as an installed app"
+    return 0
+  fi
+
+  # Attribute by contents when the top-level name is uninformative.
+  local inner
+  while IFS= read -r inner; do
+    [[ -n "$inner" ]] || continue
+    if orphans::_looks_installed "$inner" "$installed_file"; then
+      log::verbose "  Keeping ${name}: contains data owned by ${inner}"
+      return 0
+    fi
+    if orphans::_owner_is_running "$inner"; then
+      log::verbose "  Keeping ${name}: ${inner} is running"
+      return 0
+    fi
+  done < <(orphans::_inner_owners "$dir")
 
   return 1
 }
@@ -153,7 +311,9 @@ orphans::_record_candidate() {
 
   _ORPHAN_TOTAL=$(( _ORPHAN_TOTAL + size ))
   ORPHAN_CANDIDATES+=("$path|$name|$size")
-  log::warn "Orphan candidate: ${name} ($(utils::format_bytes "$size"))"
+  # Rendered like every other finding rather than as a warning: these are
+  # candidates for review, not problems.
+  log::item "$size" "$name"
 }
 
 orphans::_scan_application_support() {
@@ -171,7 +331,17 @@ orphans::_scan_application_support() {
         ;;
     esac
 
+    if protect::is_system_pref_domain "$name"; then
+      log::verbose "  Skipping system component: ${name}"
+      continue
+    fi
+
     orphans::_looks_installed "$name" "$installed_file" && continue
+    orphans::_looks_like_app_data "$name" "$installed_file" || {
+      log::verbose "  Skipping ${name}: not an application's data"
+      continue
+    }
+    orphans::_is_claimed_by_live_software "$dir" "$name" "$installed_file" && continue
     orphans::_is_recent "$dir" && continue
     orphans::_record_candidate "$dir" "$name"
   done < <(find "$base" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true)
@@ -185,14 +355,27 @@ orphans::_scan_containers() {
   while IFS= read -r dir; do
     local name
     name=$(basename "$dir")
-    [[ "$name" == com.apple.* ]] && continue
+    case "$name" in
+      com.apple.* | group.com.apple.* | *.com.apple.*) continue ;;
+    esac
+
+    if protect::is_system_pref_domain "$name"; then
+      log::verbose "  Skipping system component: ${name}"
+      continue
+    fi
 
     orphans::_looks_installed "$name" "$installed_file" && continue
+    orphans::_is_claimed_by_live_software "$dir" "$name" "$installed_file" && continue
     orphans::_is_recent "$dir" && continue
     orphans::_record_candidate "$dir" "$name"
   done < <(find "$base" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true)
 }
 
+# Preference domains belonging to macOS itself carry no com.apple. prefix —
+# loginwindow.plist, .GlobalPreferences.plist, sharedfilelistd.plist and the
+# rest. v0.4.x offered every one of them as an orphan candidate, so
+# `--clean-orphans --yes` would delete the user's system preferences and login
+# session state. protect::is_system_pref_domain now vetoes the whole class.
 orphans::_scan_preferences() {
   local installed_file="$1"
   local base="$HOME/Library/Preferences"
@@ -201,9 +384,23 @@ orphans::_scan_preferences() {
   while IFS= read -r plist; do
     local name
     name=$(basename "$plist" .plist)
-    [[ "$name" == com.apple.* ]] && continue
+
+    if protect::is_system_pref_domain "$name"; then
+      log::verbose "  Skipping system preference domain: ${name}"
+      continue
+    fi
 
     orphans::_looks_installed "$name" "$installed_file" && continue
+    # Applications write preferences under their bundle identifier. A bare name
+    # like ZoomChat, MiniLauncher or git-credential-manager belongs to a helper,
+    # agent or command line tool — never to an app that can be uninstalled — so
+    # it is held to the same standard as Application Support data.
+    orphans::_looks_like_app_data "$name" "$installed_file" || {
+      log::verbose "  Skipping ${name}: not an application's preference domain"
+      continue
+    }
+    orphans::_owner_is_running "$name" && continue
+    orphans::_vendor_is_installed "$name" "$installed_file" && continue
     orphans::_is_recent "$plist" && continue
     orphans::_record_candidate "$plist" "$name"
   done < <(find "$base" -maxdepth 1 -name "*.plist" -type f 2>/dev/null || true)

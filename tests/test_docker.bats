@@ -117,3 +117,80 @@ teardown() {
   # Should have parsed sizes without errors
   [[ "$output" != *"error"* ]]
 }
+
+# ── Image size accounting ─────────────────────────────────────────────────────
+# A run against a real Supabase stack advertised 14.9 GB of unused images and
+# freed 3.56 GB. `docker images --format '{{.Size}}'` reports each image's full
+# size *including shared base layers*, so summing that column counts every
+# shared layer once per image referencing it.
+
+# Three unused images (Containers=0) plus one in use. All three unused images
+# share a 500MB base: Size = SharedSize + UniqueSize.
+#   sum of Size   = 1GB + 800MB + 600MB      = 2.4GB   <- what v0.5.0 reported
+#   sum of Unique = 500MB + 300MB + 100MB    = 900MB   <- what deleting frees
+_fake_docker_df() {
+  cat <<'TABLE'
+sha256:aaaaaaaaaaaaaaaa|example/one|v1|500MB|500MB|1GB|0
+sha256:bbbbbbbbbbbbbbbb|example/two|v2|300MB|500MB|800MB|0
+sha256:cccccccccccccccc|example/three|v3|100MB|500MB|600MB|0
+sha256:dddddddddddddddd|example/inuse|v4|900MB|0B|900MB|2
+TABLE
+}
+
+@test "docker: unused image total uses unique size, not size including shared layers" {
+  docker() {
+    if [[ "$1" == "system" && "$2" == "df" ]]; then _fake_docker_df; return 0; fi
+    return 0
+  }
+
+  run docker::_report_unused_images
+  [ "$status" -eq 0 ]
+
+  docker::_report_unused_images >/dev/null 2>&1
+
+  # 500MB + 300MB + 100MB, decimal units as Docker reports them.
+  [ "$_DOCKER_UNUSED_BYTES" -eq 900000000 ]
+
+  # The pre-fix behaviour summed Size and would have produced 2.4 GB.
+  [ "$_DOCKER_UNUSED_BYTES" -ne 2400000000 ]
+}
+
+@test "docker: an image referenced by a container is never listed as unused" {
+  # Docker's own Containers count is authoritative. Matching by tag or by
+  # `--filter ancestor=` misses containers that reference an image under a
+  # different tag.
+  docker() {
+    if [[ "$1" == "system" && "$2" == "df" ]]; then _fake_docker_df; return 0; fi
+    return 0
+  }
+
+  run docker::_report_unused_images
+  [[ "$output" == *"example/one"* ]]
+  [[ "$output" != *"example/inuse"* ]]
+}
+
+@test "docker: reports the unused total as a floor, not an exact figure" {
+  # Layers shared only among the unused set also free up, so sum-of-unique
+  # under-reports. The wording must not promise an exact number.
+  docker() {
+    if [[ "$1" == "system" && "$2" == "df" ]]; then _fake_docker_df; return 0; fi
+    return 0
+  }
+
+  run docker::_report_unused_images
+  [[ "$output" == *"at least"* ]]
+}
+
+@test "docker: no unused images means no action and no output" {
+  docker() {
+    if [[ "$1" == "system" && "$2" == "df" ]]; then
+      echo 'sha256:dddddddddddddddd|example/inuse|v4|900MB|0B|900MB|2'
+      return 0
+    fi
+    return 0
+  }
+
+  run docker::_report_unused_images
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
