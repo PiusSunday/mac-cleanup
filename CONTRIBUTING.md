@@ -63,16 +63,23 @@ bash tests/smoke_test.sh
 
 ## Adding a New Cleanup Module
 
-1. Create `lib/<module>.sh` following the existing module pattern
+1. Create `lib/modules/<area>/<module>.sh` (`system`, `user` or `dev`) following the existing pattern
 2. Export a single public function: `<module>::clean()`
 3. Call `utils::require <tool>` at the start if the module depends on an external tool
-4. Wrap all destructive operations with `dry_run_or_exec`
-5. Register the module: `utils::register_module "Name" "Category" "$scanned" "$freed" "$status"`
-6. Add `module_summary "Name" "$scanned"` at the end
-7. Source the new module in `bin/mac-cleanup`
-8. Add a `TARGET_<MODULE>` flag to `lib/core.sh`
-9. Wire up the flag in `bin/mac-cleanup`'s `parse_flags` function
-10. Add Bats tests in `tests/test_<module>.bats`
+4. Route every deletion through `safe_rm`, and any command through `dry_run_or_exec` — never call
+   `rm` directly. `safe_rm` applies the protection policy and the per-run claim ledger
+5. Report on what the run actually accounted for, not on `$freed`: `TOTAL_FREED` never moves during
+   a preview, so a module measuring it will announce "Nothing to clean" while queueing gigabytes
+6. Register the module: `utils::register_module "Name" "Category" "$scanned" "$freed" "$status" "$projected"`
+7. Use `utils::register_action` for anything found but deliberately not removed, so it reaches the
+   "needs your decision" block with the command that would act on it
+8. Never gate a whole module behind `utils::confirm` — it declines during a preview by design, so
+   the module would silently do nothing under `--dry-run`
+9. Source the new module in `bin/mac-cleanup`
+10. Add a `TARGET_<MODULE>` flag to `lib/core/core.sh`
+11. Wire up the flag in `bin/mac-cleanup`'s `parse_flags` function, and gate the module on it
+12. Add Bats tests in `tests/test_<module>.bats`, including a positive fixture proving each detector
+    fires — see the rule below
 
 ## Pull Request Guidelines
 
