@@ -116,6 +116,12 @@ Each read as a passing result. So:
 - Prefer a probe you control over the developer's real data: a throwaway image, a scratch `$HOME`,
   a file you created in the Trash yourself.
 
+The same applies to the environment the tests themselves assume. `timeout` is GNU coreutils and is
+not present on macOS, so four tests that used it passed on a developer machine with Homebrew
+coreutils installed and failed on a clean `macos-latest` runner with exit 127. Prefer the portable
+mechanisms the tool already uses — `perl -e 'alarm ...'` rather than `timeout`, `sed -E` rather than
+BRE alternation, and `stat -f` rather than `stat -c`.
+
 The same applies to fallbacks. A fallback that never runs is dead code with a comment claiming
 otherwise, so exercise it directly — `system::_trash_size_bytes` has a test for the `du` path even
 though Full Disk Access usually stops it running on a real machine.
