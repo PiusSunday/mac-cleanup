@@ -51,6 +51,23 @@ Simulator runtimes are no longer only reported: `--simulators` removes the ones 
 
 ---
 
+## Upgrading from v0.4.x
+
+v0.5.0 changes behaviour that scripts may depend on:
+
+| Before | Now |
+| --- | --- |
+| Any target also ran the system scan and orphan pass | A target flag means only that target — add `--system` for the rest |
+| `--system` / `--all` emptied the Trash | Needs `--empty-trash`; `--yes` alone never reaches it |
+| `--yes` deleted `~/.pub-cache` | Requires an interactive confirmation |
+| `--devtools` deleted editor workspaces older than 30 days | Only removes workspaces whose project folder is gone |
+| Large reclaimable totals | Smaller and accurate — the old figures double-counted shared bytes |
+
+If a scripted invocation reclaims less than it used to, that is expected: the previous totals
+counted the same bytes once per module that walked them.
+
+---
+
 ## Supported macOS Versions
 
 macOS 12 Monterey and later (Apple Silicon + Intel).
