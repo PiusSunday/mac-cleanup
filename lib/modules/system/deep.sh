@@ -65,6 +65,24 @@ system_deep::_add_scanned() {
   fi
 }
 
+# Age-gated bulk sweeps match hundreds of interchangeable files — 204 rotated
+# temp files under /private/tmp on the development machine, every one labelled
+# identically. Listing each is noise, not transparency, so the default is one
+# rolled-up line per sweep and --verbose still prints every path. Nothing is
+# truncated in either mode.
+system_deep::_sweep_summary() {
+  local label="$1"
+  local count="$2"
+  local bytes="$3"
+
+  (( count > 0 )) || return 0
+  if (( count == 1 )); then
+    log::info "${label}: 1 file ($(utils::format_bytes "$bytes"))"
+  else
+    log::info "${label}: ${count} files ($(utils::format_bytes "$bytes"))"
+  fi
+}
+
 system_deep::_delete_by_find() {
   local base="$1"
   local label="$2"
@@ -86,17 +104,22 @@ system_deep::_delete_by_find() {
   fi
   find_cmd+=(-mtime "+${age_days}" -print)
 
+  local count=0
+  local bytes=0
   while IFS= read -r file; do
     [[ -n "$file" ]] || continue
-    local size
-    size=$(utils::get_size_bytes "$file")
-    system_deep::_add_scanned "$size"
     if [[ "$use_sudo" == "true" && "${_SYSTEM_DEEP_CAN_USE_SUDO:-false}" == "true" ]]; then
-      safe_rm "$file" "$label" "sudo"
+      safe_rm "$file" "${label}: $(basename "$file")" "sudo silent"
     else
-      safe_rm "$file" "$label"
+      safe_rm "$file" "${label}: $(basename "$file")" "silent"
     fi
+    (( SAFE_RM_LAST_BYTES > 0 )) || continue
+    system_deep::_add_scanned "$SAFE_RM_LAST_BYTES"
+    bytes=$(( bytes + SAFE_RM_LAST_BYTES ))
+    (( count++ )) || true
   done < <("${find_cmd[@]}" 2>/dev/null || true)
+
+  system_deep::_sweep_summary "$label" "$count" "$bytes"
 }
 
 system_deep::_unified_logs() {
@@ -104,16 +127,19 @@ system_deep::_unified_logs() {
   [[ -d "$base" ]] || return 0
   log::info "Unified logs: scanning trace archives older than ${DEEP_LOG_AGE_DAYS} days"
 
+  local count=0
+  local bytes=0
   while IFS= read -r file; do
     [[ -n "$file" ]] || continue
-    local size
-    size=$(utils::get_size_bytes "$file")
-    system_deep::_add_scanned "$size"
     if [[ "${_SYSTEM_DEEP_CAN_USE_SUDO:-false}" == "true" ]]; then
-      safe_rm "$file" "Unified log archive" "sudo"
+      safe_rm "$file" "Unified log: $(basename "$file")" "sudo silent"
     else
-      safe_rm "$file" "Unified log archive"
+      safe_rm "$file" "Unified log: $(basename "$file")" "silent"
     fi
+    (( SAFE_RM_LAST_BYTES > 0 )) || continue
+    system_deep::_add_scanned "$SAFE_RM_LAST_BYTES"
+    bytes=$(( bytes + SAFE_RM_LAST_BYTES ))
+    (( count++ )) || true
   done < <(
     if [[ "${_SYSTEM_DEEP_CAN_USE_SUDO:-false}" == "true" ]]; then
       sudo find "$base" -type f \( -name "*.tracev3" -o -name "*.logdata" \) -mtime "+${DEEP_LOG_AGE_DAYS}" -print 2>/dev/null || true
@@ -121,6 +147,8 @@ system_deep::_unified_logs() {
       find "$base" -type f \( -name "*.tracev3" -o -name "*.logdata" \) -mtime "+${DEEP_LOG_AGE_DAYS}" -print 2>/dev/null || true
     fi
   )
+
+  system_deep::_sweep_summary "Unified logs" "$count" "$bytes"
 }
 
 system_deep::_power_logs() {
@@ -135,16 +163,19 @@ system_deep::_var_log_rotated() {
   local base="/private/var/log"
   [[ -d "$base" ]] || return 0
 
+  local count=0
+  local bytes=0
   while IFS= read -r file; do
     [[ -n "$file" ]] || continue
-    local size
-    size=$(utils::get_size_bytes "$file")
-    system_deep::_add_scanned "$size"
     if [[ "${_SYSTEM_DEEP_CAN_USE_SUDO:-false}" == "true" ]]; then
-      safe_rm "$file" "Rotated system log" "sudo"
+      safe_rm "$file" "Rotated log: $(basename "$file")" "sudo silent"
     else
-      safe_rm "$file" "Rotated system log"
+      safe_rm "$file" "Rotated log: $(basename "$file")" "silent"
     fi
+    (( SAFE_RM_LAST_BYTES > 0 )) || continue
+    system_deep::_add_scanned "$SAFE_RM_LAST_BYTES"
+    bytes=$(( bytes + SAFE_RM_LAST_BYTES ))
+    (( count++ )) || true
   done < <(
     if [[ "${_SYSTEM_DEEP_CAN_USE_SUDO:-false}" == "true" ]]; then
       sudo find "$base" -type f \( -name "*.gz" -o -name "*.asl" -o -name "*.log" \) -mtime "+${DEEP_LOG_AGE_DAYS}" -print 2>/dev/null || true
@@ -152,6 +183,8 @@ system_deep::_var_log_rotated() {
       find "$base" -type f \( -name "*.gz" -o -name "*.asl" -o -name "*.log" \) -mtime "+${DEEP_LOG_AGE_DAYS}" -print 2>/dev/null || true
     fi
   )
+
+  system_deep::_sweep_summary "Rotated system logs" "$count" "$bytes"
 }
 
 system_deep::_private_tmp() {

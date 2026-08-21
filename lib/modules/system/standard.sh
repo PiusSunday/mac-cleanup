@@ -83,11 +83,10 @@ system::_crash_reports() {
     local count=0
     local dir_bytes=0
     while IFS= read -r file; do
-      local fbytes
-      fbytes=$(utils::get_size_bytes "$file")
-      dir_bytes=$(( dir_bytes + fbytes ))
+      safe_rm "$file" "Crash report: $(basename "$file")" "silent"
+      (( SAFE_RM_LAST_BYTES > 0 )) || continue
       (( count++ )) || true
-      safe_rm "$file" "Crash report"
+      dir_bytes=$(( dir_bytes + SAFE_RM_LAST_BYTES ))
     done < <(find "$path" -maxdepth 1 \( -name "*.crash" -o -name "*.ips" -o -name "*.hang" \) -type f 2>/dev/null || true)
 
     total_count=$(( total_count + count ))
@@ -96,7 +95,9 @@ system::_crash_reports() {
 
   _SYS_CRASH_TOTAL=$total_bytes
 
-  if (( total_count > 0 )); then
+  if (( total_count == 1 )); then
+    log::info "Crash reports: 1 file ($(utils::format_bytes "$total_bytes"))"
+  elif (( total_count > 1 )); then
     log::info "Crash reports: ${total_count} files ($(utils::format_bytes "$total_bytes"))"
   else
     log::info "Crash reports: none found."
@@ -112,13 +113,15 @@ system::_ds_store() {
   local total_bytes=0
   local skipped=0
   while IFS= read -r file; do
-    local fbytes
-    fbytes=$(utils::get_size_bytes "$file")
-    total_bytes=$(( total_bytes + fbytes ))
     (( count++ )) || true
-    if ! safe_rm "$file" ".DS_Store" "silent"; then
+    # SAFE_RM_LAST_BYTES is 0 whenever the file was whitelisted, protected,
+    # unwritable or already claimed. The old add-then-subtract dance only saw
+    # a non-zero return, which safe_rm does not use for those cases.
+    safe_rm "$file" ".DS_Store" "silent"
+    if (( SAFE_RM_LAST_BYTES > 0 )); then
+      total_bytes=$(( total_bytes + SAFE_RM_LAST_BYTES ))
+    else
       (( skipped++ )) || true
-      total_bytes=$(( total_bytes - fbytes ))
     fi
   done < <(find "$HOME" \
     -name ".DS_Store" \
@@ -135,7 +138,7 @@ system::_ds_store() {
     local msg
     if (( skipped > 0 )); then
       local deleted=$(( count - skipped ))
-      msg=".DS_Store: ${deleted} of ${count} files deleted ($(utils::format_bytes "$total_bytes")) — ${skipped} skipped (permission denied)"
+      msg=".DS_Store: ${deleted} of ${count} files ($(utils::format_bytes "$total_bytes")) — ${skipped} skipped (protected or unwritable)"
     else
       msg=".DS_Store: ${count} files ($(utils::format_bytes "$total_bytes"))"
     fi
@@ -146,6 +149,45 @@ system::_ds_store() {
 }
 
 # ── c) Trash ─────────────────────────────────────────────────────────────────
+
+# "1 item" / "2 items"
+system::_item_count_phrase() {
+  local n="${1:-0}"
+  if (( n == 1 )); then
+    printf '1 item'
+  else
+    printf '%s items' "$n"
+  fi
+}
+
+# Bytes in the Trash, or empty when it cannot be determined.
+#
+# Finder returns the AppleScript token `missing value` for `get size of trash`
+# far more often than it returns a number, so the Finder answer is only ever an
+# opportunistic first try. `du` on ~/.Trash is the fallback; it needs Full Disk
+# Access for some items and does not see other volumes' trash, which is why an
+# unknown size must never suppress the finding.
+system::_trash_size_bytes() {
+  local from_finder
+  from_finder=$(_osascript_timed 5 -e 'tell application "Finder" to get size of trash') || from_finder=""
+  if [[ "$from_finder" =~ ^[0-9]+$ ]] && (( from_finder > 0 )); then
+    printf '%s\n' "$from_finder"
+    return 0
+  fi
+
+  if [[ -d "$HOME/.Trash" ]]; then
+    local kb
+    kb=$(utils::run_timed "${MAC_CLEANUP_DU_TIMEOUT:-20}" du -skPx "$HOME/.Trash" 2>/dev/null | awk 'NR==1 {print $1}')
+    if [[ "$kb" =~ ^[0-9]+$ ]] && (( kb > 0 )); then
+      printf '%s\n' "$(( kb * 1024 ))"
+      return 0
+    fi
+  fi
+
+  # Unknown. Callers must still report the item count.
+  printf ''
+  return 0
+}
 
 # Run osascript with a timeout (seconds). Returns 1 on timeout or failure.
 # Uses perl alarm() — available on all macOS versions, no background processes.
@@ -169,22 +211,48 @@ system::_trash() {
     return
   fi
 
-  # Query size via Finder before deletion
-  local trash_size_str
-  trash_size_str=$(_osascript_timed 5 -e 'tell application "Finder" to get size of trash') || trash_size_str=0
-  [[ "$trash_size_str" =~ ^[0-9]+$ ]] || trash_size_str=0
-  local trash_size=$(( trash_size_str ))
-  _SYS_TRASH_TOTAL=$trash_size
+  # Size is a best-effort upgrade over the count, never a precondition.
+  local trash_size
+  trash_size=$(system::_trash_size_bytes)
+  _SYS_TRASH_TOTAL=${trash_size:-0}
 
-  if (( trash_size == 0 )); then
-    log::info "Trash: ${trash_count} items"
-  else
-    log::info "Trash: ${trash_count} items ($(utils::format_bytes "$trash_size"))"
+  local size_note=""
+  if [[ -n "$trash_size" ]]; then
+    size_note=" ($(utils::format_bytes "$trash_size"))"
+  fi
+
+  # The Trash is user data: files the user chose to delete but has not committed
+  # to losing, which macOS keeps recoverable on purpose. Emptying it is not part
+  # of a cache sweep, and --yes must not be able to trigger it — that flag means
+  # "do not ask me about cleanup", not "destroy recoverable data".
+  if [[ "${EMPTY_TRASH:-false}" != "true" ]]; then
+    log::info "Trash: $(system::_item_count_phrase "$trash_count")${size_note} — left alone"
+    # Gate on the count, not the size. Finder answers `get size of trash` with
+    # the token `missing value` rather than a number, so a size-based gate
+    # silently dropped the Trash out of the decisions summary entirely — a user
+    # with 50 GB of it was told nothing.
+    utils::register_action \
+      "$(system::_item_count_phrase "$trash_count") in the Trash" \
+      "${trash_size:-0}" \
+      "mac-cleanup --empty-trash"
+    return
   fi
 
   if [[ "$DRY_RUN" == "true" ]]; then
-    TOTAL_DRYRUN_BYTES=$(( TOTAL_DRYRUN_BYTES + trash_size ))
-    log::info "[DRY-RUN] Would empty Trash (${trash_count} items)"
+    TOTAL_DRYRUN_BYTES=$(( TOTAL_DRYRUN_BYTES + ${trash_size:-0} ))
+    log::info "[DRY-RUN] Would empty Trash ($(system::_item_count_phrase "$trash_count"))"
+    return
+  fi
+
+  # Deleting recoverable user data is confirmed explicitly. --empty-trash plus
+  # --yes is two deliberate flags, and is honoured without a prompt: requiring
+  # one anyway would make --empty-trash unusable non-interactively, where
+  # utils::confirm always declines. --yes on its own still cannot reach here.
+  if [[ "$SKIP_CONFIRM" == "true" ]]; then
+    log::warn "Emptying the Trash ($(system::_item_count_phrase "$trash_count")${size_note}) — --empty-trash and --yes both given."
+  elif ! utils::confirm "Permanently empty the Trash ($(system::_item_count_phrase "$trash_count")${size_note})?"; then
+    log::info "Trash: left alone."
+    _SYS_TRASH_TOTAL=0
     return
   fi
 
@@ -199,12 +267,13 @@ system::_trash() {
     # Since we can't capture bytes via safe_rm for the Finder AppleScript,
     # we must default to adding the computed size manually.
     if [[ "$DRY_RUN" != "true" ]]; then
-      TOTAL_FREED=$(( TOTAL_FREED + trash_size ))
+      TOTAL_FREED=$(( TOTAL_FREED + ${trash_size:-0} ))
     fi
-    local disk_delta=$trash_size
+    local disk_delta=${trash_size:-0}
 
     # Use whichever is larger: Finder-reported size or actual disk delta
-    local actual_freed=$(( trash_size > disk_delta ? trash_size : disk_delta ))
+    local known=${trash_size:-0}
+    local actual_freed=$(( known > disk_delta ? known : disk_delta ))
     _SYS_TRASH_TOTAL=$actual_freed
 
     if (( actual_freed > 0 )); then
@@ -243,7 +312,6 @@ system::_dev_tool_caches() {
     local npm_bytes
     npm_bytes=$(utils::get_size_bytes "$npm_cache")
     _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + npm_bytes ))
-    log::info "npm cache: $(utils::format_bytes "$npm_bytes")"
     safe_rm "$npm_cache" "npm cache"
   else
     log::verbose "npm cache not found — skipping."
@@ -256,8 +324,7 @@ system::_dev_tool_caches() {
     npx_bytes=$(utils::get_size_bytes "$npx_cache")
     if (( npx_bytes > 0 )); then
       _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + npx_bytes ))
-      log::info "npm npx cache: $(utils::format_bytes "$npx_bytes")"
-      safe_rm "$npx_cache" "npm npx cache"
+        safe_rm "$npx_cache" "npm npx cache"
     fi
   fi
 
@@ -268,8 +335,7 @@ system::_dev_tool_caches() {
     npm_logs_bytes=$(utils::get_size_bytes "$npm_logs")
     if (( npm_logs_bytes > 0 )); then
       _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + npm_logs_bytes ))
-      log::info "npm logs: $(utils::format_bytes "$npm_logs_bytes")"
-      safe_rm "$npm_logs" "npm logs"
+        safe_rm "$npm_logs" "npm logs"
     fi
   fi
 
@@ -279,7 +345,6 @@ system::_dev_tool_caches() {
     local pip_bytes
     pip_bytes=$(utils::get_size_bytes "$pip_cache")
     _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + pip_bytes ))
-    log::info "pip cache: $(utils::format_bytes "$pip_bytes")"
     safe_rm "$pip_cache" "pip cache"
   else
     log::verbose "pip cache not found — skipping."
@@ -307,8 +372,7 @@ system::_dev_tool_caches() {
     gcloud_logs_bytes=$(utils::get_size_bytes "$gcloud_logs")
     if (( gcloud_logs_bytes > 0 )); then
       _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + gcloud_logs_bytes ))
-      log::info "Google Cloud logs: $(utils::format_bytes "$gcloud_logs_bytes")"
-      safe_rm "$gcloud_logs" "Google Cloud logs"
+        safe_rm "$gcloud_logs" "Google Cloud logs"
     fi
   fi
 
@@ -319,8 +383,7 @@ system::_dev_tool_caches() {
     gcloud_cache_bytes=$(utils::get_size_bytes "$gcloud_cache")
     if (( gcloud_cache_bytes > 0 )); then
       _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + gcloud_cache_bytes ))
-      log::info "Google Cloud cache: $(utils::format_bytes "$gcloud_cache_bytes")"
-      safe_rm "$gcloud_cache" "Google Cloud cache"
+        safe_rm "$gcloud_cache" "Google Cloud cache"
     fi
   fi
 
@@ -331,8 +394,7 @@ system::_dev_tool_caches() {
     kube_bytes=$(utils::get_size_bytes "$kube_cache")
     if (( kube_bytes > 0 )); then
       _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + kube_bytes ))
-      log::info "Kubernetes cache: $(utils::format_bytes "$kube_bytes")"
-      safe_rm "$kube_cache" "Kubernetes cache"
+        safe_rm "$kube_cache" "Kubernetes cache"
     fi
   fi
 
@@ -343,8 +405,7 @@ system::_dev_tool_caches() {
     aws_bytes=$(utils::get_size_bytes "$aws_cache")
     if (( aws_bytes > 0 )); then
       _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + aws_bytes ))
-      log::info "AWS CLI cache: $(utils::format_bytes "$aws_bytes")"
-      safe_rm "$aws_cache" "AWS CLI cache"
+        safe_rm "$aws_cache" "AWS CLI cache"
     fi
   fi
 }
@@ -371,7 +432,7 @@ system::_var_folders() {
       (( size > 0 )) || continue
       log::verbose "  var/folders temp: $(utils::format_bytes "$size") ($subdir)"
       safe_rm "$target" "var/folders temp ($subdir)" "silent"
-      total=$(( total + size ))
+      total=$(( total + SAFE_RM_LAST_BYTES ))
     done < <(find /private/var/folders -maxdepth 4 -name "$subdir" -type d 2>/dev/null || true)
   done
 

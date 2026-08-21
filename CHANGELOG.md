@@ -7,6 +7,116 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.5.0] - 2026-08-21
+
+The accuracy and safety release. Every deletion now routes through one policy, the dry-run preview
+reports the number a live run actually frees, and several deletion targets that were simply wrong
+have been corrected.
+
+### Fixed
+
+#### Data loss
+
+- **Live databases were deleted.** Apple sandboxes were matched with a `com.apple.` prefix test,
+  which Apple's *group* containers do not have. That queued
+  `group.com.apple.storekit/Library/Caches/storeUser.db` and its `-wal`/`-shm` sidecars; removing
+  the sidecars of an open SQLite database corrupts it. Apple sandboxes are now matched under every
+  prefix Apple uses, and the protection policy refuses any `*.db` / `*.sqlite*` family member that
+  is open.
+- **`--devtools` deleted live editor state.** Editor `workspaceStorage` directories were selected
+  with `find -mtime +30` alone, which answers "not opened recently", not "no longer needed" — and
+  `--devtools` runs as part of `--all` with no prompt. On the development machine that flagged 27
+  workspaces whose projects still existed (862 MB, including the repository open at the time)
+  against 3 genuinely dead. Each directory's `workspace.json` is now parsed and the `file://` URI
+  percent-decoded; a workspace is removed only when its folder is provably gone, and anything
+  undatable is kept.
+- **`--clean-orphans` would have deleted a running browser's database.** Ownership was decided by
+  matching directory names against installed app names, so `firestore` — Arc's local database at
+  `firestore/Arc/bcny-arc-server`, 40.5 MB, growing while Arc ran — was 97% of the reported orphan
+  total. Ownership is now attributed by directory contents, anything whose owning process is running
+  is kept, a shared publisher counts as installed (`zoom.us` ships as `us.zoom.xos`), and entries
+  must look like an application's data at all, which excludes toolchain state such as `go`,
+  `pypoetry` and `virtualenv`.
+- **`--clean-orphans --yes` deleted macOS system preferences.** Only `com.apple.*` domains were
+  filtered, so bare-named ones (`loginwindow`, `.GlobalPreferences_m`, `corespotlightd`) were
+  offered and removed without prompting.
+- **Every target ran the system scan.** `system::clean` and `orphans::clean` were called above the
+  target gating, so `mac-cleanup --docker` swept crash reports, `.DS_Store` and npm caches, and
+  emptied the Trash. Both are now gated behind `--system`; `--docker --dry-run` went from 55 s to
+  under 2 s.
+- **`--dry-run` could block waiting for input** at the Flutter pub-cache prompt.
+
+#### Accuracy
+
+- **The preview never matched a live run.** Overlapping sweeps counted the same bytes repeatedly. A
+  per-run claim ledger now counts each path once. On an identical fixture v0.4.3 previewed
+  1,232,896 B and freed 1,028,096 B; this release previews and frees 512,000 B.
+- **Docker sizes were inflated by shared layers.** `docker images --format '{{.Size}}'` reports each
+  image's full size including shared base layers, so summing it counted every shared layer once per
+  referencing image — 14.9 GB advertised against 3.56 GB actually freed. Sizes now come from
+  `docker system df -v`'s `UniqueSize`, and unused is decided by Docker's own `Containers` count.
+  Reproduced with three images sharing a 64 MB base: 284.4 MB reported before, 28.3 MB now,
+  91.6 MB actually freed — the figure is a floor rather than a ceiling.
+- **The "Found" column overstated what could be reclaimed** — a real machine read "21.2 GB found /
+  848.5 MB reclaimable". pnpm reported its whole store, Xcode its whole Archives tree, and the
+  user-log scan measured a SIP-protected directory it never queued.
+- **The Trash never reached the decisions summary.** Finder answers `get size of trash` with the
+  token `missing value`, so a size-based gate suppressed the entry entirely. It is now gated on the
+  item count, with size as a best-effort upgrade.
+- **The developer-artifact scan reported `0 B` on every run**, walking `$HOME` for ~30 s to find
+  nothing, because the "orphaned node_modules" condition can essentially never hold.
+- **Orphan detection matched almost nothing:** `tr -cd '[:alnum:]'` stripped the trailing newline,
+  collapsing the installed-apps file to a single line so the exact lookup never matched.
+- **Snapshot detection always claimed snapshots existed** — `tmutil` prints a header even when there
+  are none.
+- **`~/.gradle/caches` was deleted wholesale**, forcing a full dependency re-download. Only
+  regenerated build state is removed now.
+- **Empty arrays aborted the run on bash 3.2**, which is what macOS ships.
+- **`du` could hang the run and over-count** — probes now use `du -skPx` and are time-boxed.
+- **`--devops-reset --dry-run` did nothing at all.** The mode gated its entire body on a
+  confirmation, and confirmations decline during a preview by design, so it printed
+  "(no modules ran)" — the most destructive mode in the tool could only be discovered by running it
+  live. It now previews without asking, and still asks before a live run.
+- **`--devops-reset` reported a preview as clean.** It measured `TOTAL_FREED`, which never moves
+  during a dry run, so it announced "Nothing to clean" and registered as Clean while queueing
+  gigabytes. It now reports on the same basis as every other module.
+- **Local snapshots were announced as clean.** macOS reports no size for a snapshot and the deletion
+  runs through `tmutil` rather than `safe_rm`, so there were no bytes to attribute and the module
+  reported "Nothing to clean" while listing real snapshots. It now reports the count and surfaces
+  them as a decision.
+- **`install.sh` printed an empty version**, reading a path that moved in the v0.4.0 refactor.
+
+### Added
+
+- `lib/core/protect.sh` — one deletion-protection policy for the whole tool: system paths, user data
+  roots, credential stores, open SQLite families, macOS service caches, the Neural Engine compiled
+  model cache, and macOS preference domains.
+- `--simulators` — removes superseded Xcode simulator runtimes and the devices orphaned with them
+  (23.6 GB + 9.4 GB on the development machine, previously listed as "informational").
+- `--purge-stale` / `--stale-days N` — build artifacts in projects untouched for 90+ days.
+- `--empty-trash` — the Trash is user data and `--yes` alone never reaches it.
+- `--include-system-caches` — opt in to `~/Library/Caches/com.apple.*`, off by default because those
+  are rebuilt within minutes.
+- Docker lists unused but tagged images individually with the `docker rmi` command rather than
+  prune-deleting them.
+
+### Changed
+
+- **Rewrote the summary report.** Modules ranked by reclaimable size with a proportional bar, a
+  `NEEDS YOUR DECISION` block collecting everything the tool found but will not remove on its own,
+  and one line per path instead of the duplicated pairs and `0 B` rows. A full `--all --dry-run`
+  went from 266 lines to 223 while carrying more information.
+- Live runs print the projection beside the measured free-space delta and flag a material shortfall.
+- Editor cache coverage extended to VS Code Insiders, Windsurf, Zed, VSCodium and Antigravity IDE.
+
+### Development
+
+- A standing rule in `CONTRIBUTING.md`: every detector that can report "nothing found" ships with a
+  positive fixture proving it fires. Four defects in this release were silent no-matches that each
+  read as a passing result.
+- 211 bats tests, up from 84. `--devops-reset`, previously the only module with no coverage at
+  all, now has fixtures for every ecosystem it touches plus the model-cache opt-in.
+
 ## [v0.4.3] - 2026-03-15
 
 ### Fixed

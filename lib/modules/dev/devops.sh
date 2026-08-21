@@ -5,7 +5,11 @@ devops_reset::run() {
   log::section "DevOps Reset Mode"
   log::warn "This mode performs deep cleanup across Docker and language toolchains."
 
-  if [[ "$SKIP_CONFIRM" != "true" ]]; then
+  # A preview must never be gated on a confirmation. utils::confirm declines
+  # during a dry run by design, so gating the whole body on it meant
+  # `--devops-reset --dry-run` printed "(no modules ran)" and the most
+  # destructive mode in the tool could only be discovered by running it live.
+  if [[ "$DRY_RUN" != "true" ]] && [[ "$SKIP_CONFIRM" != "true" ]]; then
     utils::confirm "Proceed with DevOps Reset mode?" || return 0
   fi
 
@@ -29,14 +33,18 @@ devops_reset::run() {
     projected="$freed"
   fi
 
-  module_summary "DevOps Reset" "$freed"
+  # TOTAL_FREED never moves during a preview, so reporting on $freed made a
+  # dry run announce "Nothing to clean" and register as Clean while queueing
+  # gigabytes. Report on what this run actually accounted for — the same basis
+  # every other module uses.
+  module_summary "DevOps Reset" "$projected"
 
   local status="clean"
-  if (( freed > 0 )); then
-    status="$freed"
+  if (( projected > 0 )); then
+    status="$projected"
   fi
 
-  utils::register_module "DevOps Reset" "Developer Tools" "$freed" "$freed" "$status" "$projected"
+  utils::register_module "DevOps Reset" "Developer Tools" "$projected" "$freed" "$status" "$projected"
 }
 
 devops_reset::_docker_full() {
