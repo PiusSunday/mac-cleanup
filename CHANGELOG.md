@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Positive fixtures for five detectors that had none, found by applying the new rule to the rest of
+  the codebase rather than waiting for a fifth report: Chrome/Edge framework-version pruning, the
+  Zen profile cache, Mail attachment ageing, and recent-items metadata. All four were
+  parse-dependent — the exact shape that has failed silently here before. `tests/test_mail.bats` is
+  new; the others extend `tests/test_browsers.bats`.
 - A standing rule in `CONTRIBUTING.md`: every detector that can report "nothing found" ships with a
   positive fixture proving it fires. This is the fourth silent-no-match defect in this codebase —
   the orphan matcher, the BSD `sed` parse, the `node_modules` scan and now the Trash gate — and each
