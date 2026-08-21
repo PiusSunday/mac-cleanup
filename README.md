@@ -142,7 +142,7 @@ mac-cleanup --version
 ### Expected output
 
 ```text
-🧹 mac-cleanup v0.5.0
+🧹 mac-cleanup v0.5.3
 ⚠  DRY-RUN mode — no files will be deleted
 
   Apple Silicon  |  macOS 26.5  |  Free: 203.4 GB  |  User mode
@@ -151,6 +151,7 @@ mac-cleanup --version
 ━━━ System Scan ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ℹ Crash reports: 1 file (356 KB)
 ℹ .DS_Store: 3 of 9 files (32 KB) — 6 skipped (protected or unwritable)
+ℹ Trash: 41 items — left alone
        21.6 MB  npm cache
        36.0 MB  npm npx cache
 ✔   System → 58.0 MB reclaimable
@@ -165,36 +166,37 @@ mac-cleanup --version
 ⚠   3 superseded runtime(s) found — not removed without --simulators.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  🧹 mac-cleanup v0.5.0  ·  dry run  ·  1m 54s
+  🧹 mac-cleanup v0.5.3  ·  dry run  ·  1m 36s
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   MODULE                  RECLAIMABLE   ITEMS
-  Dev Artifacts                1.1 GB      25  ██████████████████████████
-  System                      58.0 MB       7  █
-  Homebrew                    36.7 MB       1  ▏
-  Caches                      12.6 MB      30  ▏
-  Browsers                     5.6 MB       1  ▏
-  Deep System                  2.7 MB     204  ▏
-  Xcode                        580 KB       2  ▏
+  Dev Artifacts               67.1 MB       7  ██████████████████████████
+  System                      58.0 MB       6  ██████████████████████
+  Homebrew                    36.8 MB       1  ██████████████
+  Caches                      12.7 MB      31  ████
+  Browsers                     5.6 MB       1  ██
+  Deep System                  2.7 MB     204  █
+  Xcode                        964 KB       2  ▏
   ──────────────────────────────────────────────────────────────────────────
-  Total                        1.3 GB     270
+  Total                      183.4 MB     252
 
-  Already clean   Apps & Containers, Mail, Snapshots
-  Needs review    Orphans, Docker
+  Already clean   Orphans, Docker, Apps & Containers, Mail, Snapshots
   Skipped         6 paths protected by policy, 4 counted by another module
 
   NEEDS YOUR DECISION
-     23.6 GB   3 superseded Xcode simulator runtimes
+     23.6 GB   3 superseded Xcode simulator runtimes + the devices bound to them
                mac-cleanup --simulators
-     14.9 GB   16 unused Docker images (listed above)
-               docker rmi <name>
-     34.4 MB   18 stale app containers and preference files
-               mac-cleanup --clean-orphans
+    574.5 MB   Flutter pub cache (every package re-downloads on next build)
+               mac-cleanup --devtools  (asks before removing)
+    128.6 MB   5 build artifacts in projects untouched for 90+ days
+               mac-cleanup --purge-stale
+    size n/a   41 items in the Trash
+               mac-cleanup --empty-trash
 
-  Disk            203.4 GB free  →  204.7 GB after cleanup
+  Disk            203.4 GB free  →  203.6 GB after cleanup
   Log             ~/.mac-cleanup/cleanup.log
 
-  This was a preview. Re-run without --dry-run to reclaim 1.3 GB.
+  This was a preview. Re-run without --dry-run to reclaim 183.4 MB.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
@@ -209,8 +211,10 @@ keep. Summing those headline sizes is what made an earlier version advertise 14.
 
 **NEEDS YOUR DECISION** is the part worth reading. It collects everything the tool
 found but will not remove on its own, each with the command that would remove it.
-On the machine above that is 38.5 GB — far more than the 1.3 GB of automatic
-cleanup — and none of it is touched without an explicit flag.
+On the machine above that is over 24 GB against 183 MB of automatic cleanup, and
+none of it is touched without an explicit flag. `size n/a` means the size could
+not be measured — macOS will not report the size of the Trash — not that the
+entry is empty.
 
 Every path that will be deleted is printed. Bulk age-gated sweeps (rotated logs,
 `.DS_Store`, temp files) are rolled up into one line by default; `--verbose` lists
