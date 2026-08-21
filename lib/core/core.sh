@@ -7,7 +7,7 @@ export VERBOSE=${VERBOSE:-false}
 export SKIP_CONFIRM=${SKIP_CONFIRM:-false}
 
 # ── Global Constants ───────────────────────────────────────────────────────────
-VERSION="0.4.3"
+VERSION="0.5.0"
 LOG_DIR="$HOME/.mac-cleanup"
 LOG_FILE="$LOG_DIR/cleanup.log"
 
@@ -15,8 +15,8 @@ LOG_FILE="$LOG_DIR/cleanup.log"
 # decimal mismatches in utilities like printf and bc on European machines.
 export LC_NUMERIC=C
 
-export LOG_FILE=${LOG_FILE:-"$HOME/.mac-cleanup/cleanup.log"} # This line is redundant now, but keeping it as per original structure
-export VERSION="$VERSION" # Export the updated version
+export LOG_FILE
+export VERSION
 
 # Cleanup targets (default: all false, set by CLI flags)
 export TARGET_SYSTEM=false
@@ -41,6 +41,26 @@ export SHOW_OPERATION_LOG=${SHOW_OPERATION_LOG:-false}
 export SHOW_VERSION=${SHOW_VERSION:-false}
 export TARGET_OPTIMIZE=${TARGET_OPTIMIZE:-false}
 
+# Opt-in to purging macOS service caches under ~/Library/Caches/com.apple.*.
+# Off by default: those caches are rebuilt by background daemons within minutes,
+# so removing them inflates the reported total without freeing durable space.
+export INCLUDE_SYSTEM_CACHES=${INCLUDE_SYSTEM_CACHES:-false}
+
+# Opt-in to deleting unusable Xcode simulator runtimes and stale simulator
+# devices. Off by default: runtimes are multi-gigabyte downloads.
+export TARGET_SIMULATORS=${TARGET_SIMULATORS:-false}
+
+# Opt-in to deleting build artifacts in projects that have not been touched in
+# STALE_PROJECT_DAYS. Off by default: reclaiming these costs a rebuild.
+export PURGE_STALE=${PURGE_STALE:-false}
+export STALE_PROJECT_DAYS=${STALE_PROJECT_DAYS:-90}
+
+# The Trash holds files the user chose to delete but has not committed to
+# losing — macOS keeps them precisely so they can be recovered. --yes means
+# "do not ask me about cleanup", not "destroy recoverable user data", so
+# emptying it requires its own flag.
+export EMPTY_TRASH=${EMPTY_TRASH:-false}
+
 # Per-module reporting arrays
 # Each module registers: name, category, scanned bytes, freed bytes, status,
 # and projected reclaimable bytes for the summary report.
@@ -50,6 +70,13 @@ declare -a MODULE_SCANNED=()
 declare -a MODULE_FREED=()
 declare -a MODULE_STATUS=()
 declare -a MODULE_PROJECTED=()
+declare -a MODULE_ITEMS=()
+
+# Opt-in wins surfaced in the report's "needs your decision" block: things the
+# tool found but will not remove without an explicit flag.
+declare -a ACTION_LABELS=()
+declare -a ACTION_BYTES=()
+declare -a ACTION_COMMANDS=()
 
 # Paths that macOS SIP or system ownership protects — never attempt deletion
 # Adding a path here prevents all modules from queuing it for rm

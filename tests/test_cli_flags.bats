@@ -43,12 +43,53 @@ setup() {
   run "$PROJECT_ROOT/bin/mac-cleanup" --version
 
   [ "$status" -eq 0 ]
-  [ "$output" = "mac-cleanup v0.4.3" ]
+  [ "$output" = "mac-cleanup v0.5.0" ]
 }
 
 @test "cli: -V prints version and exits" {
   run "$PROJECT_ROOT/bin/mac-cleanup" -V
 
   [ "$status" -eq 0 ]
-  [ "$output" = "mac-cleanup v0.4.3" ]
+  [ "$output" = "mac-cleanup v0.5.0" ]
+}
+# ── Target gating ─────────────────────────────────────────────────────────────
+# system::clean and orphans::clean used to run above the gating, so any target
+# also swept crash reports, .DS_Store, npm caches and emptied the Trash.
+
+@test "cli: --docker runs Docker only, with no System pass" {
+  run timeout 300 "$PROJECT_ROOT/bin/mac-cleanup" --docker --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"System Scan"* ]]
+  [[ "$output" != *"Orphaned App Data"* ]]
+  [[ "$output" != *"Crash reports"* ]]
+  [[ "$output" != *"npm cache"* ]]
+  [[ "$output" == *"Docker"* ]]
+}
+
+@test "cli: --brew does not drag in the System pass either" {
+  run timeout 300 "$PROJECT_ROOT/bin/mac-cleanup" --brew --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"System Scan"* ]]
+  [[ "$output" != *"Orphaned App Data"* ]]
+  [[ "$output" == *"Homebrew"* ]]
+}
+
+@test "cli: --system does run the System pass" {
+  run timeout 600 "$PROJECT_ROOT/bin/mac-cleanup" --system --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"System Scan"* ]]
+  [[ "$output" == *"Orphaned App Data"* ]]
+}
+
+@test "cli: --all still covers System" {
+  run timeout 900 "$PROJECT_ROOT/bin/mac-cleanup" --all --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"System Scan"* ]]
+}
+
+@test "cli: --empty-trash is documented and implies the system target" {
+  run "$PROJECT_ROOT/bin/mac-cleanup" --help
+  [[ "$output" == *"--empty-trash"* ]]
+  [[ "$output" == *"--yes alone never reaches it"* ]]
+  [[ "$output" == *"Prompts unless --yes is also passed"* ]]
 }

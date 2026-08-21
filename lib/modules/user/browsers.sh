@@ -83,8 +83,10 @@ browsers::_safari_icons() {
 }
 
 browsers::_arc() {
+  # ~/Library/Caches/company.thebrowser.Browser belongs to caches::_user_caches,
+  # which owns everything under ~/Library/Caches. Listing it here as well is what
+  # made the same bytes appear in two modules' totals.
   local -a arc_paths=(
-    "$HOME/Library/Caches/company.thebrowser.Browser"
     "$HOME/Library/Application Support/Arc/User Data/Default/Cache/Cache_Data"
     "$HOME/Library/Application Support/Arc/User Data/Default/GPUCache"
     "$HOME/Library/Application Support/Arc/User Data/Default/Code Cache"

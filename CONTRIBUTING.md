@@ -92,6 +92,34 @@ Never add code that:
 - Runs destructive operations without going through `dry_run_or_exec`
 - Auto-deletes anything in "System Data clues" — those are informational only
 
+## Every detector ships with a fixture that proves it fires
+
+A detector that reports "nothing found" is indistinguishable from a detector that is broken, and
+this project has shipped that bug four separate times:
+
+| Detector | Looked like | Actually was |
+| --- | --- | --- |
+| Orphan name matcher | no false positives | `tr -cd '[:alnum:]'` ate the newline, so the installed-apps file was one line and the exact lookup never matched |
+| Editor workspace check | keeping everything, safely | BSD `sed` has no BRE alternation, so the parse captured nothing and every workspace looked unparseable |
+| `node_modules` scan | a clean machine | the orphan condition can never hold, so a 30-second `$HOME` walk always returned `0 B` |
+| Trash decision | no Trash worth reporting | Finder answers `get size of trash` with `missing value`, and a size-based gate suppressed the entry |
+
+Each read as a passing result. So:
+
+- Any detector that can return "nothing found" needs a test with a **positive** fixture proving it
+  fires, not only negative fixtures proving it stays quiet.
+- When a real positive cannot be reproduced on the developer's machine, build a synthetic one —
+  see `tests/test_devtools.bats` (a workspace whose folder was deleted) and `tests/test_orphans.bats`
+  (`com.deadvendor.DeadApp`).
+- Never treat an empty result during manual verification as confirmation. Plant a positive, confirm
+  it is caught, then remove it.
+- Prefer a probe you control over the developer's real data: a throwaway image, a scratch `$HOME`,
+  a file you created in the Trash yourself.
+
+The same applies to fallbacks. A fallback that never runs is dead code with a comment claiming
+otherwise, so exercise it directly — `system::_trash_size_bytes` has a test for the `du` path even
+though Full Disk Access usually stops it running on a real machine.
+
 ## Releasing a New Version
 
 mac-cleanup uses an automated GitHub Actions workflow for releases. To publish a new version:
