@@ -142,7 +142,7 @@ mac-cleanup --version
 ### Expected output
 
 ```text
-🧹 mac-cleanup v0.5.3
+🧹 mac-cleanup v0.5.0
 ⚠  DRY-RUN mode — no files will be deleted
 
   Apple Silicon  |  macOS 26.5  |  Free: 203.4 GB  |  User mode
@@ -166,7 +166,7 @@ mac-cleanup --version
 ⚠   3 superseded runtime(s) found — not removed without --simulators.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  🧹 mac-cleanup v0.5.3  ·  dry run  ·  1m 36s
+  🧹 mac-cleanup v0.5.0  ·  dry run  ·  1m 36s
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   MODULE                  RECLAIMABLE   ITEMS
@@ -320,7 +320,7 @@ decision names the item count and shows `size n/a` rather than dropping the entr
 
 ### Targets mean what they say
 
-`mac-cleanup --docker` cleans Docker. Until v0.5.2 the system scan and orphan pass ran above the
+`mac-cleanup --docker` cleans Docker. Until v0.5.0 the system scan and orphan pass ran above the
 target gating, so any target also swept crash reports, `.DS_Store`, npm caches and emptied the
 Trash.
 

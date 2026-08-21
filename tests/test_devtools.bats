@@ -280,7 +280,7 @@ _make_project() {
 }
 
 # ── Editor workspace storage ──────────────────────────────────────────────────
-# v0.5.1 selected workspaceStorage directories with `find -mtime +30` alone,
+# v0.4.3 selected workspaceStorage directories with `find -mtime +30` alone,
 # which answers "not opened recently", not "no longer needed". On the
 # development machine that flagged 27 workspaces whose projects still existed —
 # 862 MB of live editor state, including the repo open at the time — against 3

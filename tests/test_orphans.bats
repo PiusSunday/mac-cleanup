@@ -26,7 +26,7 @@ teardown() {
 
 @test "orphans::clean: detects stale orphan candidate in Application Support" {
   # Reverse-DNS name: a real app writes its data under its bundle identifier,
-  # and since v0.5.2 only such names are eligible.
+  # and since v0.5.0 only such names are eligible.
   local orphan_dir="$HOME/Library/Application Support/com.zzzzvendor.OrphanApp"
   mkdir -p "$orphan_dir"
   echo "payload" > "$orphan_dir/data.bin"
@@ -123,7 +123,7 @@ teardown() {
 }
 
 # ── Live-software attribution ─────────────────────────────────────────────────
-# v0.5.1 matched directory names against installed app names, so generic dirs
+# v0.4.3 matched directory names against installed app names, so generic dirs
 # were flagged regardless of who owned them. `firestore` is Arc's local database
 # (firestore/Arc/bcny-arc-server), 40.5 MB, growing during an active session,
 # and it was 97% of the reported orphan total.

@@ -207,7 +207,7 @@ setup() {
 
 # ── Trash gating ──────────────────────────────────────────────────────────────
 # The Trash holds files the user chose to delete but has not committed to
-# losing. Until v0.5.2 system::_trash emptied it as part of an ordinary cache
+# losing. Until v0.5.0 system::_trash emptied it as part of an ordinary cache
 # sweep — and because system::clean ran above the target gating, even
 # `mac-cleanup --docker` did it.
 
