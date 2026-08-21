@@ -130,17 +130,46 @@ though Full Disk Access usually stops it running on a real machine.
 
 mac-cleanup uses an automated GitHub Actions workflow for releases. To publish a new version:
 
-1. Update the `VERSION` variable in `lib/core.sh`.
-2. Update `CHANGELOG.md` with the new version notes.
-3. Merge all changes into the `main` branch.
-4. Create and push a new Git tag matching the version (e.g., `v0.2.1`):
+1. Update the `VERSION` variable in `lib/core/core.sh`.
+2. Update `CHANGELOG.md`, including a `### Breaking` section whenever behaviour that existing
+   scripts or habits depend on has changed — a reclaimable total that drops sharply counts, because
+   users will otherwise read the improvement as a regression.
+3. Verify locally with the same commands CI runs, not looser ones:
 
    ```bash
-   git tag v0.2.1
+   bats tests/
+   shellcheck $(find lib -type f -name "*.sh") bin/mac-cleanup
+   bash tests/smoke_test.sh          # ~6 minutes; runs --all three times
+   ```
+
+4. Merge into `main` and push both branches.
+5. Create and push an annotated tag matching the version:
+
+   ```bash
+   git tag -a v0.2.1 -m "v0.2.1 — summary"
    git push origin v0.2.1
    ```
 
-Pushing the tag triggers the Release workflow, which automatically runs validations, creates a GitHub Release with the tarball SHA-256, and updates the Homebrew tap.
+6. **Back-merge `main` into `develop`.** Merging `develop` into `main` with `--no-ff` puts the merge
+   commit on `main` only, so `develop` falls one commit behind per release and the gap compounds:
+
+   ```bash
+   git checkout develop && git merge --ff-only main && git push origin develop
+   ```
+
+Pushing the tag triggers the Release workflow, which runs validations, creates a GitHub Release with the tarball SHA-256, and updates the Homebrew tap.
+
+If validation fails, no release is published and the tap is untouched — check with
+`gh release view <tag>` before deciding how to recover. When nothing was published, deleting and
+re-pushing the tag on a fixed commit rewrites nothing anyone has seen:
+
+```bash
+git push origin :refs/tags/v0.2.1 && git tag -d v0.2.1
+```
+
+After the release, confirm the published tarball's SHA-256 matches the formula and that the tap
+commit landed — the workflow reports success for the release job even though the tap update is a
+separate job.
 
 ### Required Secrets
 
