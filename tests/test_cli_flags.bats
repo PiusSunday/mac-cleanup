@@ -43,14 +43,14 @@ setup() {
   run "$PROJECT_ROOT/bin/mac-cleanup" --version
 
   [ "$status" -eq 0 ]
-  [ "$output" = "mac-cleanup v0.5.2" ]
+  [ "$output" = "mac-cleanup v0.5.3" ]
 }
 
 @test "cli: -V prints version and exits" {
   run "$PROJECT_ROOT/bin/mac-cleanup" -V
 
   [ "$status" -eq 0 ]
-  [ "$output" = "mac-cleanup v0.5.2" ]
+  [ "$output" = "mac-cleanup v0.5.3" ]
 }
 # ── Target gating ─────────────────────────────────────────────────────────────
 # system::clean and orphans::clean used to run above the gating, so any target
@@ -90,5 +90,6 @@ setup() {
 @test "cli: --empty-trash is documented and implies the system target" {
   run "$PROJECT_ROOT/bin/mac-cleanup" --help
   [[ "$output" == *"--empty-trash"* ]]
-  [[ "$output" == *"never implied by --yes"* ]]
+  [[ "$output" == *"--yes alone never reaches it"* ]]
+  [[ "$output" == *"Prompts unless --yes is also passed"* ]]
 }
