@@ -80,6 +80,10 @@ have been corrected.
 - **`--devops-reset` reported a preview as clean.** It measured `TOTAL_FREED`, which never moves
   during a dry run, so it announced "Nothing to clean" and registered as Clean while queueing
   gigabytes. It now reports on the same basis as every other module.
+- **Local snapshots were announced as clean.** macOS reports no size for a snapshot and the deletion
+  runs through `tmutil` rather than `safe_rm`, so there were no bytes to attribute and the module
+  reported "Nothing to clean" while listing real snapshots. It now reports the count and surfaces
+  them as a decision.
 - **`install.sh` printed an empty version**, reading a path that moved in the v0.4.0 refactor.
 
 ### Added
@@ -110,7 +114,7 @@ have been corrected.
 - A standing rule in `CONTRIBUTING.md`: every detector that can report "nothing found" ships with a
   positive fixture proving it fires. Four defects in this release were silent no-matches that each
   read as a passing result.
-- 205 bats tests, up from 84. `--devops-reset`, previously the only module with no coverage at
+- 211 bats tests, up from 84. `--devops-reset`, previously the only module with no coverage at
   all, now has fixtures for every ecosystem it touches plus the model-cache opt-in.
 
 ## [v0.4.3] - 2026-03-15
