@@ -7,7 +7,7 @@ export VERBOSE=${VERBOSE:-false}
 export SKIP_CONFIRM=${SKIP_CONFIRM:-false}
 
 # ── Global Constants ───────────────────────────────────────────────────────────
-VERSION="0.5.3"
+VERSION="0.5.0"
 LOG_DIR="$HOME/.mac-cleanup"
 LOG_FILE="$LOG_DIR/cleanup.log"
 

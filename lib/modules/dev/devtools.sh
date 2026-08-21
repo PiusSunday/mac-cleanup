@@ -151,7 +151,7 @@ _DEV_VSCODE_TOTAL=0
 
 # ── a) node_modules ──────────────────────────────────────────────────────────
 # ── a) Stale project build artifacts ─────────────────────────────────────────
-# Until v0.5.1 this scanned for node_modules with no nearby package.json and
+# Until v0.5.0 this scanned for node_modules with no nearby package.json and
 # deleted those. A node_modules directory sits next to its package.json by
 # definition, so the condition essentially never held: on the development
 # machine the scan walked $HOME for ~30 seconds and reported
@@ -912,7 +912,7 @@ devtools::_vscode() {
 
     # Workspace storage whose project folder no longer exists.
     #
-    # Until v0.5.2 this selected purely on `find -mtime +30`, which answers
+    # Until v0.5.0 this selected purely on `find -mtime +30`, which answers
     # "not opened recently", not "no longer needed". On the development machine
     # that flagged 27 workspaces for projects that still exist — 862 MB of live
     # editor state including the repository open at the time — against 3 that
