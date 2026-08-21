@@ -13,6 +13,28 @@ The accuracy and safety release. Every deletion now routes through one policy, t
 reports the number a live run actually frees, and several deletion targets that were simply wrong
 have been corrected.
 
+### Breaking
+
+Behaviour that scripts and habits from v0.4.x may depend on:
+
+- **A target flag now means only that target.** `mac-cleanup --docker` cleans Docker and nothing
+  else. Previously the system scan and orphan pass ran on every invocation regardless of the flag,
+  so any single target also swept crash reports, `.DS_Store`, npm caches and the Trash. Add
+  `--system` if you were relying on that.
+- **The Trash is no longer emptied** by `--system` or by `--all`. It needs `--empty-trash`, and
+  `--yes` alone can never reach it.
+- **`~/.pub-cache` is no longer removed under `--yes`.** It requires an interactive confirmation,
+  because deleting it re-downloads every Flutter package.
+- **`--devtools` no longer deletes editor workspace storage by age.** A workspace is removed only
+  when its project folder no longer exists.
+- **`--clean-orphans` proposes far fewer candidates.** Ownership is now established from directory
+  contents, running processes and installed publishers, so live application data is no longer
+  offered.
+- **Reported reclaimable figures are much smaller, and that is the fix.** v0.4.3 counted the same
+  bytes once per module that walked them and sized Docker images including their shared base
+  layers; a machine that read "21.2 GB reclaimable" was never going to free that. The number now
+  reflects what a live run actually frees, and Docker sizes are a floor rather than a ceiling.
+
 ### Fixed
 
 #### Data loss
