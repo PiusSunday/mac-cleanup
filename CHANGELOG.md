@@ -73,6 +73,13 @@ have been corrected.
   regenerated build state is removed now.
 - **Empty arrays aborted the run on bash 3.2**, which is what macOS ships.
 - **`du` could hang the run and over-count** — probes now use `du -skPx` and are time-boxed.
+- **`--devops-reset --dry-run` did nothing at all.** The mode gated its entire body on a
+  confirmation, and confirmations decline during a preview by design, so it printed
+  "(no modules ran)" — the most destructive mode in the tool could only be discovered by running it
+  live. It now previews without asking, and still asks before a live run.
+- **`--devops-reset` reported a preview as clean.** It measured `TOTAL_FREED`, which never moves
+  during a dry run, so it announced "Nothing to clean" and registered as Clean while queueing
+  gigabytes. It now reports on the same basis as every other module.
 - **`install.sh` printed an empty version**, reading a path that moved in the v0.4.0 refactor.
 
 ### Added
@@ -103,7 +110,8 @@ have been corrected.
 - A standing rule in `CONTRIBUTING.md`: every detector that can report "nothing found" ships with a
   positive fixture proving it fires. Four defects in this release were silent no-matches that each
   read as a passing result.
-- 192 bats tests, up from 84.
+- 205 bats tests, up from 84. `--devops-reset`, previously the only module with no coverage at
+  all, now has fixtures for every ecosystem it touches plus the model-cache opt-in.
 
 ## [v0.4.3] - 2026-03-15
 
