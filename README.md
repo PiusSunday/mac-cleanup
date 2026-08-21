@@ -239,7 +239,7 @@ each one individually. Nothing is ever truncated.
 | `--simulators`        | —     | false   | Delete superseded Xcode simulator runtimes and prune unavailable devices                        |
 | `--include-system-caches` | — | false   | Also purge `~/Library/Caches/com.apple.*` (rebuilt by macOS; off by default)                    |
 | `--purge-stale`       | —     | false   | Delete build artifacts in projects untouched for 90+ days                                        |
-| `--empty-trash`       | —     | false   | Empty the Trash — user data, never implied by `--yes`                                            |
+| `--empty-trash`       | —     | false   | Empty the Trash — user data; `--yes` alone never reaches it                                      |
 | `--stale-days`        | —     | 90      | Days of inactivity before a project's build artifacts count as stale                             |
 | `--show-log`          | —     | false   | Print operation log from `~/.mac-cleanup/operations.log` and exit                               |
 | `--version`           | `-V`  | false   | Print the current mac-cleanup version and exit                                                  |
@@ -302,12 +302,17 @@ inflated by every module that walked the same bytes.
 `--yes` means "do not ask me about cleanup", not "destroy recoverable data". Two things are
 therefore never reachable through it:
 
-- **The Trash** needs `--empty-trash`, and confirms even then. Files there were deleted but not
-  committed to being lost — macOS keeps them recoverable on purpose.
+- **The Trash** needs `--empty-trash`. Files there were deleted but not committed to being lost —
+  macOS keeps them recoverable on purpose. `--empty-trash` prompts on its own; passing `--yes`
+  alongside it skips the prompt, since two explicit flags is already a deliberate act and requiring
+  an unanswerable prompt would make the flag unusable non-interactively. `--yes` by itself can
+  never reach the Trash.
 - **`~/.pub-cache`** is skipped under `--yes`; removing it re-downloads every Flutter package, so
   it only happens on an interactive confirmation.
 
-Both are reported as decisions instead, with the command that would act on them.
+Both are reported as decisions instead, with the command that would act on them. macOS will not
+report the size of the Trash — Finder answers `get size of trash` with `missing value` — so the
+decision names the item count and shows `size n/a` rather than dropping the entry.
 
 ### Targets mean what they say
 

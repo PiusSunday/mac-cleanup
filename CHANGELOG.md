@@ -7,6 +7,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.5.3] - 2026-08-21
+
+### Fixed
+
+- **The Trash never reached the decisions summary.** v0.5.2 correctly stopped emptying the Trash as
+  part of a cache sweep, but the compensating half never fired: Finder answers
+  `get size of trash` with the AppleScript token `missing value`, not a number, so the size fell
+  back to `0` and the `(( trash_size > 0 ))` gate suppressed the entry. A user with 50 GB of Trash
+  was told nothing. The entry is now gated on the item *count*; the size is a best-effort upgrade
+  (Finder, then `du` on `~/.Trash`, which needs Full Disk Access) and an unknown size renders as
+  `size n/a` instead of erasing the finding.
+- **"1 items"** — item counts are pluralised.
+
+### Changed
+
+- **`--empty-trash --yes` no longer prompts**, and the documentation says so. Two explicit flags is
+  a deliberate act, and requiring a prompt that cannot be answered would make `--empty-trash`
+  unusable non-interactively. `--yes` on its own still cannot reach the Trash.
+
+### Added
+
+- A standing rule in `CONTRIBUTING.md`: every detector that can report "nothing found" ships with a
+  positive fixture proving it fires. This is the fourth silent-no-match defect in this codebase —
+  the orphan matcher, the BSD `sed` parse, the `node_modules` scan and now the Trash gate — and each
+  one read as a passing result. Fallback paths are covered too, including the `du` fallback that
+  Full Disk Access usually prevents running on a real machine.
+
 ## [v0.5.2] - 2026-08-20
 
 Three data-loss defects. v0.5.1 made the report trustworthy; these made the deletion targets

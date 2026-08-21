@@ -221,6 +221,22 @@ _stub_full_trash() {
     esac
     return 0
   }
+  system::_trash_size_bytes() { printf '2147483648\n'; }
+}
+
+# What Finder actually does: it answers `get size of trash` with the AppleScript
+# token `missing value`, not a number.
+_stub_trash_unknown_size() {
+  _osascript_timed() {
+    case "$*" in
+      *"count items in trash"*) echo 1 ;;
+      *"get size of trash"*)    echo "missing value" ;;
+      *"empty trash"*)          _TRASH_EMPTIED=true ;;
+    esac
+    return 0
+  }
+  # No ~/.Trash in the sandboxed HOME either, so the size is genuinely unknown.
+  system::_trash_size_bytes() { printf ''; }
 }
 
 @test "system: the Trash is left alone without --empty-trash" {
@@ -295,4 +311,120 @@ _stub_full_trash() {
   run system::_trash
   [[ "$output" == *"empty"* ]]
   [ "${#ACTION_LABELS[@]}" -eq 0 ]
+}
+
+@test "system: an unmeasurable Trash still reaches the decisions summary" {
+  # Finder returns the token `missing value`, so a size-based gate silently
+  # dropped the Trash from NEEDS YOUR DECISION entirely — a user with 50 GB of
+  # it was told nothing.
+  _stub_trash_unknown_size
+  EMPTY_TRASH=false
+  DRY_RUN=true
+  ACTION_LABELS=(); ACTION_BYTES=(); ACTION_COMMANDS=()
+
+  system::_trash >/dev/null 2>&1
+
+  [ "${#ACTION_LABELS[@]}" -eq 1 ]
+  [[ "${ACTION_LABELS[0]}" == *"in the Trash"* ]]
+  [[ "${ACTION_COMMANDS[0]}" == *"--empty-trash"* ]]
+}
+
+@test "system: the decision names the item count when the size is unknown" {
+  _stub_trash_unknown_size
+  EMPTY_TRASH=false
+  DRY_RUN=true
+  ACTION_LABELS=(); ACTION_BYTES=(); ACTION_COMMANDS=()
+
+  system::_trash >/dev/null 2>&1
+  [[ "${ACTION_LABELS[0]}" == "1 item in the Trash" ]]
+  [ "${ACTION_BYTES[0]}" -eq 0 ]
+}
+
+@test "system: a raw 'missing value' never becomes a byte count" {
+  _osascript_timed() {
+    case "$*" in
+      *"count items in trash"*) echo 3 ;;
+      *"get size of trash"*)    echo "missing value" ;;
+    esac
+    return 0
+  }
+  # Real implementation, no override: it must reject the token and fall through.
+  run system::_trash_size_bytes
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"missing"* ]]
+  [[ -z "$output" || "$output" =~ ^[0-9]+$ ]]
+}
+
+@test "system: item counts are pluralised correctly" {
+  [ "$(system::_item_count_phrase 1)" = "1 item" ]
+  [ "$(system::_item_count_phrase 0)" = "0 items" ]
+  [ "$(system::_item_count_phrase 125)" = "125 items" ]
+}
+
+@test "system: a known size is still preferred over the count alone" {
+  _stub_full_trash
+  EMPTY_TRASH=false
+  DRY_RUN=true
+  ACTION_LABELS=(); ACTION_BYTES=(); ACTION_COMMANDS=()
+
+  system::_trash >/dev/null 2>&1
+  [ "${ACTION_BYTES[0]}" -eq 2147483648 ]
+}
+
+@test "system: --empty-trash with --yes empties without prompting" {
+  # Two explicit flags is the deliberate act; requiring a prompt as well would
+  # make --empty-trash unusable non-interactively.
+  _stub_full_trash
+  EMPTY_TRASH=true
+  SKIP_CONFIRM=true
+  DRY_RUN=false
+  _TRASH_EMPTIED=false
+
+  run system::_trash
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"both given"* ]]
+}
+
+@test "system: the du fallback produces a real size when the Trash is readable" {
+  # Proves the fallback is a live path. On a Mac without Full Disk Access du
+  # reports "Operation not permitted" on the real ~/.Trash, which is why an
+  # unknown size must degrade to the item count rather than suppress the entry.
+  local real_home="$HOME"
+  HOME=$(mktemp -d "${BATS_TEST_TMPDIR:-/tmp}/trash-home.XXXXXX")
+  mkdir -p "$HOME/.Trash"
+  dd if=/dev/zero of="$HOME/.Trash/big.bin" bs=1024 count=2048 2>/dev/null
+
+  _osascript_timed() {
+    case "$*" in
+      *"get size of trash"*) echo "missing value" ;;
+      *) echo 1 ;;
+    esac
+    return 0
+  }
+
+  run system::_trash_size_bytes
+  local measured="$output"
+  rm -rf "$HOME"; HOME="$real_home"
+
+  [ "$status" -eq 0 ]
+  [ "$measured" -ge 2097152 ]
+}
+
+@test "system: an unreadable Trash yields unknown, not zero-as-a-size" {
+  local real_home="$HOME"
+  HOME=$(mktemp -d "${BATS_TEST_TMPDIR:-/tmp}/trash-home.XXXXXX")
+  mkdir -p "$HOME/.Trash"
+  _osascript_timed() {
+    case "$*" in
+      *"get size of trash"*) echo "missing value" ;;
+      *) echo 1 ;;
+    esac
+    return 0
+  }
+  # Nothing in it and nothing measurable: the answer is empty, not "0".
+  run system::_trash_size_bytes
+  local measured="$output"
+  rm -rf "$HOME"; HOME="$real_home"
+
+  [ -z "$measured" ]
 }

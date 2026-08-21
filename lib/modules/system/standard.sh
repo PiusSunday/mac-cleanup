@@ -150,6 +150,45 @@ system::_ds_store() {
 
 # ── c) Trash ─────────────────────────────────────────────────────────────────
 
+# "1 item" / "2 items"
+system::_item_count_phrase() {
+  local n="${1:-0}"
+  if (( n == 1 )); then
+    printf '1 item'
+  else
+    printf '%s items' "$n"
+  fi
+}
+
+# Bytes in the Trash, or empty when it cannot be determined.
+#
+# Finder returns the AppleScript token `missing value` for `get size of trash`
+# far more often than it returns a number, so the Finder answer is only ever an
+# opportunistic first try. `du` on ~/.Trash is the fallback; it needs Full Disk
+# Access for some items and does not see other volumes' trash, which is why an
+# unknown size must never suppress the finding.
+system::_trash_size_bytes() {
+  local from_finder
+  from_finder=$(_osascript_timed 5 -e 'tell application "Finder" to get size of trash') || from_finder=""
+  if [[ "$from_finder" =~ ^[0-9]+$ ]] && (( from_finder > 0 )); then
+    printf '%s\n' "$from_finder"
+    return 0
+  fi
+
+  if [[ -d "$HOME/.Trash" ]]; then
+    local kb
+    kb=$(utils::run_timed "${MAC_CLEANUP_DU_TIMEOUT:-20}" du -skPx "$HOME/.Trash" 2>/dev/null | awk 'NR==1 {print $1}')
+    if [[ "$kb" =~ ^[0-9]+$ ]] && (( kb > 0 )); then
+      printf '%s\n' "$(( kb * 1024 ))"
+      return 0
+    fi
+  fi
+
+  # Unknown. Callers must still report the item count.
+  printf ''
+  return 0
+}
+
 # Run osascript with a timeout (seconds). Returns 1 on timeout or failure.
 # Uses perl alarm() — available on all macOS versions, no background processes.
 _osascript_timed() {
@@ -172,17 +211,14 @@ system::_trash() {
     return
   fi
 
-  # Query size via Finder before deletion
-  local trash_size_str
-  trash_size_str=$(_osascript_timed 5 -e 'tell application "Finder" to get size of trash') || trash_size_str=0
-  [[ "$trash_size_str" =~ ^[0-9]+$ ]] || trash_size_str=0
-  local trash_size=$(( trash_size_str ))
-  _SYS_TRASH_TOTAL=$trash_size
+  # Size is a best-effort upgrade over the count, never a precondition.
+  local trash_size
+  trash_size=$(system::_trash_size_bytes)
+  _SYS_TRASH_TOTAL=${trash_size:-0}
 
-  if (( trash_size == 0 )); then
-    log::info "Trash: ${trash_count} items"
-  else
-    log::info "Trash: ${trash_count} items ($(utils::format_bytes "$trash_size"))"
+  local size_note=""
+  if [[ -n "$trash_size" ]]; then
+    size_note=" ($(utils::format_bytes "$trash_size"))"
   fi
 
   # The Trash is user data: files the user chose to delete but has not committed
@@ -190,24 +226,31 @@ system::_trash() {
   # of a cache sweep, and --yes must not be able to trigger it — that flag means
   # "do not ask me about cleanup", not "destroy recoverable data".
   if [[ "${EMPTY_TRASH:-false}" != "true" ]]; then
-    log::info "Trash: ${trash_count} items ($(utils::format_bytes "$trash_size")) — left alone"
-    if (( trash_size > 0 )); then
-      utils::register_action \
-        "${trash_count} items in the Trash" \
-        "$trash_size" \
-        "mac-cleanup --empty-trash"
-    fi
+    log::info "Trash: $(system::_item_count_phrase "$trash_count")${size_note} — left alone"
+    # Gate on the count, not the size. Finder answers `get size of trash` with
+    # the token `missing value` rather than a number, so a size-based gate
+    # silently dropped the Trash out of the decisions summary entirely — a user
+    # with 50 GB of it was told nothing.
+    utils::register_action \
+      "$(system::_item_count_phrase "$trash_count") in the Trash" \
+      "${trash_size:-0}" \
+      "mac-cleanup --empty-trash"
     return
   fi
 
   if [[ "$DRY_RUN" == "true" ]]; then
-    TOTAL_DRYRUN_BYTES=$(( TOTAL_DRYRUN_BYTES + trash_size ))
-    log::info "[DRY-RUN] Would empty Trash (${trash_count} items)"
+    TOTAL_DRYRUN_BYTES=$(( TOTAL_DRYRUN_BYTES + ${trash_size:-0} ))
+    log::info "[DRY-RUN] Would empty Trash ($(system::_item_count_phrase "$trash_count"))"
     return
   fi
 
-  # Even with the flag, deleting recoverable user data is confirmed explicitly.
-  if ! utils::confirm "Permanently empty the Trash (${trash_count} items, $(utils::format_bytes "$trash_size"))?"; then
+  # Deleting recoverable user data is confirmed explicitly. --empty-trash plus
+  # --yes is two deliberate flags, and is honoured without a prompt: requiring
+  # one anyway would make --empty-trash unusable non-interactively, where
+  # utils::confirm always declines. --yes on its own still cannot reach here.
+  if [[ "$SKIP_CONFIRM" == "true" ]]; then
+    log::warn "Emptying the Trash ($(system::_item_count_phrase "$trash_count")${size_note}) — --empty-trash and --yes both given."
+  elif ! utils::confirm "Permanently empty the Trash ($(system::_item_count_phrase "$trash_count")${size_note})?"; then
     log::info "Trash: left alone."
     _SYS_TRASH_TOTAL=0
     return
@@ -224,12 +267,13 @@ system::_trash() {
     # Since we can't capture bytes via safe_rm for the Finder AppleScript,
     # we must default to adding the computed size manually.
     if [[ "$DRY_RUN" != "true" ]]; then
-      TOTAL_FREED=$(( TOTAL_FREED + trash_size ))
+      TOTAL_FREED=$(( TOTAL_FREED + ${trash_size:-0} ))
     fi
-    local disk_delta=$trash_size
+    local disk_delta=${trash_size:-0}
 
     # Use whichever is larger: Finder-reported size or actual disk delta
-    local actual_freed=$(( trash_size > disk_delta ? trash_size : disk_delta ))
+    local known=${trash_size:-0}
+    local actual_freed=$(( known > disk_delta ? known : disk_delta ))
     _SYS_TRASH_TOTAL=$actual_freed
 
     if (( actual_freed > 0 )); then

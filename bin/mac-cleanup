@@ -67,7 +67,8 @@ ${BOLD}TARGETS:${RESET}
   --snapshots, -s    Delete local Time Machine snapshots
   --simulators       Delete unusable Xcode simulator runtimes and stale devices
   --purge-stale      Delete build artifacts in projects untouched for 90+ days
-  --empty-trash      Empty the Trash (user data — never implied by --yes)
+  --empty-trash      Empty the Trash. User data: --yes alone never reaches it.
+                     Prompts unless --yes is also passed.
   --caches, -c       Clear ~/Library/Caches, Zsh, Spotify, JetBrains, and app caches
   --mail, -m         Clean old Mail downloads and recent-item metadata
   --brew, -b         Run brew cleanup and autoremove
@@ -520,7 +521,16 @@ report::_actions() {
 
   while IFS='|' read -r bytes label command; do
     [[ -n "$label" ]] || continue
-    printf '  %s%10s%s   %s\n' "${BOLD}" "$(utils::format_bytes "$((10#$bytes))")" "${RESET}" "$label"
+    # A size of zero here means "not measurable", not "nothing there" — Finder
+    # will not report the size of the Trash. Rendering it as 0 B would read as
+    # "no point bothering"; the label carries the item count instead.
+    local size_fmt
+    if (( 10#$bytes > 0 )); then
+      size_fmt=$(utils::format_bytes "$((10#$bytes))")
+    else
+      size_fmt="size n/a"
+    fi
+    printf '  %s%10s%s   %s\n' "${BOLD}" "$size_fmt" "${RESET}" "$label"
     [[ -n "$command" ]] && printf '               %s%s%s\n' "${CYAN}" "$command" "${RESET}"
   done <<< "$ordered"
 }
