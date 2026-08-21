@@ -5,6 +5,18 @@ setup() {
   PROJECT_ROOT="${BATS_TEST_DIRNAME}/.."
 }
 
+# Bound a command's runtime portably.
+#
+# `timeout` is GNU coreutils and is NOT present on macOS — it only exists on a
+# developer machine that installed it via Homebrew, which is why these tests
+# passed locally and failed on a clean macos-latest runner with exit 127. Use
+# perl's alarm(), the same mechanism utils::run_timed uses in the tool itself.
+_timed() {
+  local secs="$1"
+  shift
+  perl -e 'alarm shift @ARGV; exec @ARGV or exit 127' "$secs" "$@"
+}
+
 @test "parse_flags: --verbose alone defaults to safe all dry-run" {
   run bash -c '
     source "$1/bin/mac-cleanup"
@@ -57,7 +69,7 @@ setup() {
 # also swept crash reports, .DS_Store, npm caches and emptied the Trash.
 
 @test "cli: --docker runs Docker only, with no System pass" {
-  run timeout 300 "$PROJECT_ROOT/bin/mac-cleanup" --docker --dry-run
+  run _timed 300 "$PROJECT_ROOT/bin/mac-cleanup" --docker --dry-run
   [ "$status" -eq 0 ]
   [[ "$output" != *"System Scan"* ]]
   [[ "$output" != *"Orphaned App Data"* ]]
@@ -67,7 +79,7 @@ setup() {
 }
 
 @test "cli: --brew does not drag in the System pass either" {
-  run timeout 300 "$PROJECT_ROOT/bin/mac-cleanup" --brew --dry-run
+  run _timed 300 "$PROJECT_ROOT/bin/mac-cleanup" --brew --dry-run
   [ "$status" -eq 0 ]
   [[ "$output" != *"System Scan"* ]]
   [[ "$output" != *"Orphaned App Data"* ]]
@@ -75,14 +87,14 @@ setup() {
 }
 
 @test "cli: --system does run the System pass" {
-  run timeout 600 "$PROJECT_ROOT/bin/mac-cleanup" --system --dry-run
+  run _timed 600 "$PROJECT_ROOT/bin/mac-cleanup" --system --dry-run
   [ "$status" -eq 0 ]
   [[ "$output" == *"System Scan"* ]]
   [[ "$output" == *"Orphaned App Data"* ]]
 }
 
 @test "cli: --all still covers System" {
-  run timeout 900 "$PROJECT_ROOT/bin/mac-cleanup" --all --dry-run
+  run _timed 900 "$PROJECT_ROOT/bin/mac-cleanup" --all --dry-run
   [ "$status" -eq 0 ]
   [[ "$output" == *"System Scan"* ]]
 }
