@@ -7,6 +7,85 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.6.0] - 2026-10-17
+
+The correctness-and-speed release. Emptying the Trash is now verified rather than assumed, and a
+full `--all` run dropped from about 160 s to about 27 s on the development machine by removing the
+per-file and per-candidate process forks that dominated the scan.
+
+### Breaking
+
+Behaviour that scripts and habits from v0.5.0 may depend on:
+
+- **`--empty-trash` now deletes the Trash directly when Finder claims success but leaves items
+  behind.** `tell application "Finder" to empty trash` exits 0 even when nothing is emptied (locked
+  files, a half-granted Automation permission, a headless or CI runner), so a run could report
+  "Trash emptied" while the Trash was untouched. Success is now measured: the item count is
+  re-queried afterwards and anything still present is removed through the normal deletion policy, so
+  an explicit `--empty-trash` is actually honoured. Nothing is reported as emptied unless a re-query
+  confirmed it.
+- **`install.sh` chooses its symlink directory by architecture.** It prefers `/opt/homebrew/bin` on
+  Apple Silicon and `/usr/local/bin` on Intel, falling back to `~/.local/bin` when neither is
+  writable. On an Apple Silicon machine that previously installed to `/usr/local/bin`, `mac-cleanup`
+  now resolves through `/opt/homebrew/bin`.
+- **A Trash that is left alone no longer counts toward the module's scanned total.** It frees nothing
+  on that run, so including it in "found" was a double count in the summary.
+
+### Fixed
+
+- **A Trash that could not be read was reported as empty.** The Finder query was coerced to `0` when
+  it refused or timed out, and the filesystem fallback ran only when the whole call failed. The
+  count now falls back to reading `~/.Trash` directly, and answers "unknown" — never a fabricated
+  `0` — only when that is unreadable too. Finder stays authoritative for other volumes' trash while
+  it answers.
+- **Dev-tool caches over-reported what they freed.** The `--system` npm, pip, gcloud, kubectl and AWS
+  cache totals were summed from a `du` taken *before* deletion and added even when the path was
+  whitelisted or protected and nothing was removed. The bytes now come from what `safe_rm` actually
+  freed.
+- **`system::_var_folders` swept other users' temp trees.** It searched all of
+  `/private/var/folders` for the current user's temp subdirectories rather than the path
+  `getconf DARWIN_USER_TEMP_DIR` already names. The search is now scoped to that path.
+- **A stale Time Machine `inProgress` backup could block an unattended run** on a password prompt.
+  The delete now requires sudo to be already available (`sudo -n true`), matching `deep.sh`, and
+  otherwise warns instead of hanging.
+
+### Changed
+
+- **The `.DS_Store` sweep no longer descends into `~/Library`, `$HOME/.*`, `node_modules` or
+  `.git`.** Those files exist but Finder never displays them, so nothing a user can see is skipped.
+  The pass used `-not -path` (which still walked every excluded tree and then discarded the results)
+  and now uses `-prune`; on the development machine it went from about 40 s to a few seconds.
+
+### Performance
+
+- **Removed the process forks that dominated a full scan.** `--all --dry-run` went from about 160 s
+  to about 27 s on the development machine, on the same fixture:
+  - `_log_to_file` and `_oplog` forked `mkdir -p`, `dirname` and `date` for each of the roughly
+    1,700 log lines a full run writes. The directory is remembered and the timestamp is cached
+    per second using the `SECONDS` builtin.
+  - Per-file `basename`/`dirname` calls on the hot paths are replaced by pure-bash
+    `utils::basename`/`utils::dirname`.
+  - Orphan detection forked `grep` for every candidate and every ancestor prefix (about 380 spawns
+    per run); the installed-names file is loaded once and matched in bash.
+  - Cache ownership forked up to three `pgrep`s plus a `launchctl | awk | grep` pipeline for every
+    candidate app; the process table and launchd labels are now snapshotted once per run, with
+    case-insensitive matching done by the shell.
+  - `devtools::_project_last_touched` forked `stat` up to 200 times for each candidate project; it
+    now batches `stat` with `-exec ... +` and prunes build trees by name.
+  - `utils::get_size_bytes` no longer forks `awk` to split `du` output.
+  - `safe_rm` accepts an optional pre-measured size, so callers that already ran `du` (Xcode,
+    browsers, Gradle, Flutter, Mail, orphans and others) no longer walk the same path twice.
+- **`find` prunes the trees it would only reject.** The `__pycache__` and Flutter `pubspec.yaml`
+  scans used `-not -path` filters that still descended into `venv`, `node_modules`, `.git`, `build`
+  and `.dart_tool`; they now `-prune` instead.
+
+### Development
+
+- `tests/test_trash.bats` — 11 new tests over the Trash count, verification and fallback paths,
+  including a Finder that reports success without emptying anything. The suite is now 222 tests.
+- Bash 3.2 remains the floor: no `${var,,}`, `mapfile` or associative arrays. The case-insensitive
+  process match uses `shopt -s nocasematch` rather than a per-candidate `tr`.
+
 ## [v0.5.0] - 2026-08-21
 
 The accuracy and safety release. Every deletion now routes through one policy, the dry-run preview

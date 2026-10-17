@@ -79,8 +79,8 @@ devtools::clean() {
   local freed_before=$TOTAL_FREED
   local dryrun_before=$TOTAL_DRYRUN_BYTES
 
-  devtools::_node_modules
-  module_scanned=$(( module_scanned + _DEV_NODE_TOTAL ))
+  devtools::_stale_artifacts
+  module_scanned=$(( module_scanned + _DEV_ARTIFACT_TOTAL ))
 
   devtools::_rust_targets
   module_scanned=$(( module_scanned + _DEV_RUST_TOTAL ))
@@ -136,7 +136,7 @@ devtools::clean() {
 
 # ── Internal state ────────────────────────────────────────────────────────────
 
-_DEV_NODE_TOTAL=0
+_DEV_ARTIFACT_TOTAL=0
 _DEV_RUST_TOTAL=0
 _DEV_CARGO_TOTAL=0
 _DEV_PYTHON_TOTAL=0
@@ -149,7 +149,6 @@ _DEV_BUNTNPM_TOTAL=0
 _DEV_ANDROID_TOTAL=0
 _DEV_VSCODE_TOTAL=0
 
-# ── a) node_modules ──────────────────────────────────────────────────────────
 # ── a) Stale project build artifacts ─────────────────────────────────────────
 # Until v0.5.0 this scanned for node_modules with no nearby package.json and
 # deleted those. A node_modules directory sits next to its package.json by
@@ -206,21 +205,24 @@ devtools::_project_root() {
 # Files whose mtime represents real work, as opposed to build output.
 devtools::_project_last_touched() {
   local project="$1"
-  local newest=0
-  local f mtime
+  local newest=0 mtime
 
-  while IFS= read -r f; do
-    [[ -n "$f" ]] || continue
-    mtime=$(stat -f%m "$f" 2>/dev/null || echo 0)
+  # One batched `stat` (via `-exec ... +`) instead of a fork per file: the old
+  # loop spawned `stat` up to 200 times for every candidate project. The build
+  # trees are pruned by name rather than filtered by path so `find` never
+  # descends into them.
+  while IFS= read -r mtime; do
+    [[ "$mtime" =~ ^[0-9]+$ ]] || continue
     (( mtime > newest )) && newest=$mtime
   done < <(
-    find "$project" -maxdepth 2 -type f \
+    find "$project" -maxdepth 2 \
+      \( -name node_modules -o -name target -o -name build -o -name dist \) -prune -o \
+      -type f \
       \( -name "*.json" -o -name "*.toml" -o -name "*.yaml" -o -name "*.yml" \
          -o -name "*.lock" -o -name "*.md" -o -name "*.ts" -o -name "*.js" \
          -o -name "*.py" -o -name "*.rs" -o -name "*.go" -o -name "*.dart" \
          -o -name "*.swift" -o -name "*.rb" \) \
-      -not -path "*/node_modules/*" -not -path "*/target/*" \
-      -not -path "*/build/*" -not -path "*/dist/*" 2>/dev/null | head -200
+      -exec stat -f '%m' {} + 2>/dev/null
   )
 
   # A project whose git HEAD moved recently is active even if no file changed.
@@ -232,8 +234,8 @@ devtools::_project_last_touched() {
   printf '%s\n' "$newest"
 }
 
-devtools::_node_modules() {
-  _DEV_NODE_TOTAL=0
+devtools::_stale_artifacts() {
+  _DEV_ARTIFACT_TOTAL=0
   log::info "Scanning for stale project build artifacts (untouched ${STALE_PROJECT_DAYS}+ days)..."
 
   local exclude_args=()
@@ -304,7 +306,8 @@ devtools::_node_modules() {
       # and the project they belong to is the thing the user recognises.
       local label="${artifact/#$HOME\//}"
       if [[ "$PURGE_STALE" == "true" ]]; then
-        safe_rm "$artifact" "stale build artifact: ${label} (${age_days}d)"
+        # size_bytes is already known — pass it so safe_rm does not walk again.
+        safe_rm "$artifact" "stale build artifact: ${label} (${age_days}d)" "" "$size_bytes"
       else
         log::item "$size_bytes" "${label}  ${DIM}(untouched ${age_days}d)${RESET}"
       fi
@@ -312,10 +315,10 @@ devtools::_node_modules() {
   done
 
   if [[ "$PURGE_STALE" == "true" ]]; then
-    _DEV_NODE_TOTAL=$total_bytes
+    _DEV_ARTIFACT_TOTAL=$total_bytes
   else
     # Report-only: these bytes are not part of this run's reclaimable total.
-    _DEV_NODE_TOTAL=0
+    _DEV_ARTIFACT_TOTAL=0
     if (( stale_count > 0 )); then
       utils::register_action \
         "${stale_count} build artifacts in projects untouched for ${STALE_PROJECT_DAYS}+ days" \
@@ -420,14 +423,11 @@ devtools::_python_cache() {
       size_bytes=$(utils::get_size_bytes "$cache_dir")
       total_bytes=$(( total_bytes + size_bytes ))
       (( count++ )) || true
-      safe_rm "$cache_dir" "python __pycache__"
-    done < <(find "$scan_dir" -maxdepth 8 "${exclude_args[@]}" -type d -name "__pycache__" \
-      -not -path "*/venv/*" \
-      -not -path "*/.venv/*" \
-      -not -path "*/env/*" \
-      -not -path "*/.env/*" \
-      -not -path "*/site-packages/*" \
-      2>/dev/null || true)
+      safe_rm "$cache_dir" "python __pycache__" "" "$size_bytes"
+    done < <(find "$scan_dir" -maxdepth 8 "${exclude_args[@]}" \
+      \( -name venv -o -name .venv -o -name env -o -name .env -o -name site-packages \) -prune -o \
+      \( -name node_modules -o -name .git -o -name target \) -prune -o \
+      -type d -name "__pycache__" -print 2>/dev/null || true)
   done
 
   _DEV_PYTHON_TOTAL=$total_bytes
@@ -474,7 +474,7 @@ devtools::_gradle_cache() {
       local size_bytes
       size_bytes=$(utils::get_size_bytes "$g")
       (( size_bytes > 0 )) || continue
-      safe_rm "$g" "Gradle $(basename "$g")"
+      safe_rm "$g" "Gradle $(utils::basename "$g")" "" "$size_bytes"
       total=$(( total + size_bytes ))
     done
 
@@ -664,7 +664,7 @@ devtools::_flutter() {
       local build_size
       build_size=$(utils::get_size_bytes "${project_dir}/build")
       total_bytes=$(( total_bytes + build_size ))
-      safe_rm "${project_dir}/build" "Flutter build: ${project_dir##*/}"
+      safe_rm "${project_dir}/build" "Flutter build: ${project_dir##*/}" "" "$build_size"
     fi
 
     # .dart_tool/ directory
@@ -672,13 +672,17 @@ devtools::_flutter() {
       local dt_size
       dt_size=$(utils::get_size_bytes "${project_dir}/.dart_tool")
       total_bytes=$(( total_bytes + dt_size ))
-      safe_rm "${project_dir}/.dart_tool" "Flutter .dart_tool: ${project_dir##*/}"
+      safe_rm "${project_dir}/.dart_tool" "Flutter .dart_tool: ${project_dir##*/}" "" "$dt_size"
     fi
 
   done < <(
     for scan_dir in "${DEVTOOLS_SCAN_DIRS[@]}"; do
+      # Prune the build trees and VCS/package stores rather than filtering their
+      # contents: they contain the bulk of the entries and none of the projects.
       [[ -d "$scan_dir" ]] && \
-        find "$scan_dir" -maxdepth 8 -name "pubspec.yaml" -not -path "*/build/*" 2>/dev/null
+        find "$scan_dir" -maxdepth 8 \
+          \( -name node_modules -o -name .git -o -name build -o -name .dart_tool \) -prune -o \
+          -name "pubspec.yaml" -print 2>/dev/null
     done
   )
 
@@ -927,7 +931,7 @@ devtools::_vscode() {
         local size
         size=$(utils::get_size_bytes "$ws_dir")
         (( size > 0 )) || continue
-        safe_rm "$ws_dir" "$editor workspace for a deleted project: $(basename "$ws_dir")"
+        safe_rm "$ws_dir" "$editor workspace for a deleted project: $(utils::basename "$ws_dir")" "" "$size"
         total=$(( total + SAFE_RM_LAST_BYTES ))
       done < <(find "$storage" -mindepth 1 -maxdepth 1 -type d -mtime +30 2>/dev/null || true)
     fi

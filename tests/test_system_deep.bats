@@ -81,6 +81,10 @@ teardown() {
   local protected_dir="$HOME/protected-logs"
   mkdir -p "$protected_dir"
   echo "old-log" > "$protected_dir/test.log"
+  # `-mtime +0` means "older than 24 hours", so a freshly written file can never
+  # match; without ageing the fixture the find returns nothing and the sweep
+  # neither logs its label nor proves anything about the dry-run path.
+  touch -t 202001010101 "$protected_dir/test.log"
 
   DRY_RUN=true
   TOTAL_DRYRUN_BYTES=0

@@ -74,7 +74,7 @@ apps::_clean_containers() {
     [[ -n "$container" && -d "$container" ]] || continue
 
     local cname
-    cname=$(basename "$container")
+    cname=$(utils::basename "$container")
 
     # Skip Apple sandboxes to avoid breaking iCloud, StoreKit and system agents.
     if apps::_is_apple_container "$cname"; then

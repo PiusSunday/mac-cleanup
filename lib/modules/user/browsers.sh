@@ -55,12 +55,12 @@ browsers::_cleanup_framework_versions() {
   while IFS= read -r version_dir; do
     [[ -n "$version_dir" ]] || continue
     local vname
-    vname=$(basename "$version_dir")
+    vname=$(utils::basename "$version_dir")
     if [[ "$vname" != "$current_version" && "$vname" =~ ^[0-9]+\.[0-9]+ ]]; then
       local size
       size=$(utils::get_size_bytes "$version_dir")
       browsers::_add_scanned "$size"
-      safe_rm "$version_dir" "Old ${label} version ($vname)"
+      safe_rm "$version_dir" "Old ${label} version ($vname)" "" "$size"
     fi
   done < <(find "$framework_dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true)
 }
@@ -98,7 +98,7 @@ browsers::_arc() {
     local size
     size=$(utils::get_size_bytes "$cache")
     browsers::_add_scanned "$size"
-    safe_rm "$cache" "Arc Browser Cache"
+    safe_rm "$cache" "Arc Browser Cache" "" "$size"
   done
 }
 
@@ -112,6 +112,6 @@ browsers::_zen() {
     local size
     size=$(utils::get_size_bytes "$cache")
     browsers::_add_scanned "$size"
-    safe_rm "$cache" "Zen Browser Cache ($(basename "$profile"))"
+    safe_rm "$cache" "Zen Browser Cache ($(utils::basename "$profile"))" "" "$size"
   done < <(find "$base/Profiles" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true)
 }

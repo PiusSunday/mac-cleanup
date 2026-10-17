@@ -45,22 +45,80 @@ LOG_FILE="${LOG_FILE:-$HOME/.mac-cleanup/cleanup.log}"
 
 declare -a WHITELIST_PATTERNS=()
 
-# ── Internal log-to-file helper ───────────────────────────────────────────────
+# ── Pure-bash path helpers ────────────────────────────────────────────────────
+# basename/dirname are external processes, and a full --all run forked each of
+# them thousands of times (~1 ms apiece). These mirror the common cases — plain,
+# already-normalised paths — and are used on the per-file hot paths. Anything
+# unusual (empty string, "/") is still answered correctly.
+utils::basename() {
+  local p="$1"
+  [[ -z "$p" ]] && { printf '\n'; return 0; }
+  [[ "$p" == "/" ]] && { printf '/\n'; return 0; }
+  p="${p%/}"
+  [[ -z "$p" ]] && { printf '/\n'; return 0; }
+  printf '%s\n' "${p##*/}"
+}
+
+utils::dirname() {
+  local p="$1"
+  [[ -z "$p" ]] && { printf '.\n'; return 0; }
+  [[ "$p" == "/" ]] && { printf '/\n'; return 0; }
+  p="${p%/}"
+  case "$p" in
+    */*)
+      local d="${p%/*}"
+      [[ -z "$d" ]] && d="/"
+      printf '%s\n' "$d"
+      ;;
+    *) printf '.\n' ;;
+  esac
+}
+
+# ── Internal log-to-file helpers ──────────────────────────────────────────────
+# A full run logs ~1,700 lines. `mkdir -p`, `dirname` and `date` were each
+# forked per line; the directory only ever changes once and the timestamp once a
+# second, so both are cached. SECONDS is a bash builtin that ticks once a second.
+_LOG_DIR_READY=""
+_LOG_STAMP=""
+_LOG_STAMP_AT=-1
+_OPLOG_STAMP=""
+_OPLOG_STAMP_AT=-1
+
 _log_to_file() {
   local level="$1"
   local message="$2"
-  mkdir -p "$(dirname "$LOG_FILE")"
-  printf "[%s] [%-8s] %s\n" \
-    "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$message" >> "$LOG_FILE"
+
+  local log_dir="."
+  case "$LOG_FILE" in */*) log_dir="${LOG_FILE%/*}" ;; esac
+  if [[ "$log_dir" != "$_LOG_DIR_READY" ]]; then
+    mkdir -p "$log_dir" 2>/dev/null || true
+    _LOG_DIR_READY="$log_dir"
+  fi
+
+  if (( SECONDS != _LOG_STAMP_AT )); then
+    _LOG_STAMP="$(date '+%Y-%m-%d %H:%M:%S')"
+    _LOG_STAMP_AT=$SECONDS
+  fi
+
+  printf "[%s] [%-8s] %s\n" "$_LOG_STAMP" "$level" "$message" >> "$LOG_FILE"
 }
 
 _oplog() {
   local action="$1"
   local path="$2"
   local size="$3"
-  mkdir -p "$(dirname "$OPLOG_FILE")"
+
+  local oplog_dir="."
+  case "$OPLOG_FILE" in */*) oplog_dir="${OPLOG_FILE%/*}" ;; esac
+  [[ "$oplog_dir" == "$_LOG_DIR_READY" ]] || mkdir -p "$oplog_dir" 2>/dev/null || true
+
+  if (( SECONDS != _OPLOG_STAMP_AT )); then
+    _OPLOG_STAMP="$(date '+%Y-%m-%dT%H:%M:%S')"
+    _OPLOG_STAMP_AT=$SECONDS
+  fi
+
   printf "[%s] [%s] %s (%s)\n" \
-    "$(date '+%Y-%m-%dT%H:%M:%S')" "$action" "$path" "$size" >> "$OPLOG_FILE"
+    "$_OPLOG_STAMP" "$action" "$path" "$size" >> "$OPLOG_FILE"
 }
 
 # ── Logging functions ─────────────────────────────────────────────────────────
@@ -150,8 +208,11 @@ utils::get_size_bytes() {
     return 0
   fi
 
-  local size
-  size=$(utils::run_timed "${MAC_CLEANUP_DU_TIMEOUT:-20}" du -skPx "$path" 2>/dev/null | awk 'NR==1 {print $1}')
+  # `-s` guarantees a single line, so the kilobytes are everything up to the
+  # first tab — no need to fork awk to split it.
+  local out
+  out=$(utils::run_timed "${MAC_CLEANUP_DU_TIMEOUT:-20}" du -skPx "$path" 2>/dev/null)
+  local size="${out%%[[:space:]]*}"
   if [[ ! "$size" =~ ^[0-9]+$ ]]; then
     log::verbose "size probe timed out or failed: ${path}"
     echo 0
@@ -262,6 +323,9 @@ safe_rm() {
   local path="$1"
   local label="${2:-$path}"
   local options="${3:-}"
+  # Optional pre-measured size (bytes). Callers that already ran
+  # utils::get_size_bytes pass it here so the path is not walked twice.
+  local known_bytes="${4:-}"
   local use_force=false
   local use_sudo=false
   local use_internal=false
@@ -344,13 +408,17 @@ safe_rm() {
   fi
 
   local bytes
-  bytes=$(utils::get_size_bytes "$resolved")
+  if [[ "$known_bytes" =~ ^[0-9]+$ ]]; then
+    bytes="$known_bytes"
+  else
+    bytes=$(utils::get_size_bytes "$resolved")
+  fi
   local bytes_fmt
   bytes_fmt=$(utils::format_bytes "$bytes")
 
   if [[ "$use_sudo" != "true" ]]; then
     local parent
-    parent="$(dirname "$resolved")"
+    parent="$(utils::dirname "$resolved")"
     if [[ ! -w "$parent" ]]; then
       log::verbose "safe_rm: non-writable path skipped: $resolved"
       _oplog "SKIPPED" "$resolved" "permission"
@@ -406,7 +474,7 @@ safe_rm_contents() {
   local label_prefix="${2:-$dir}"
   [[ -d "$dir" ]] || return 0
   while IFS= read -r item; do
-    safe_rm "$item" "${label_prefix}: $(basename "$item")"
+    safe_rm "$item" "${label_prefix}: $(utils::basename "$item")"
   done < <(find "$dir" -mindepth 1 -maxdepth 1 2>/dev/null || true)
 }
 

@@ -59,6 +59,9 @@ system::clean() {
 _SYS_CRASH_TOTAL=0
 _SYS_DSSTORE_TOTAL=0
 _SYS_TRASH_TOTAL=0
+_SYS_TRASH_FREED=0
+_SYS_TRASH_VERIFIED=false
+_SYS_TRASH_REMAINING=""
 _SYS_DEVCACHE_TOTAL=0
 _SYS_VARFOLDERS_TOTAL=0
 _SYS_HAS_CLUES=false
@@ -123,14 +126,26 @@ system::_ds_store() {
     else
       (( skipped++ )) || true
     fi
-  done < <(find "$HOME" \
-    -name ".DS_Store" \
-    -maxdepth 8 \
-    -not -path "$HOME/Library/Containers/*" \
-    -not -path "$HOME/.Trash/*" \
-    -not -path "*/node_modules/*" \
-    -not -path "*/.git/*" \
-    -type f 2>/dev/null || true)
+  # -prune, not -not -path: a -not -path filter still descends into every
+  # excluded directory and then throws the results away, which is the whole cost.
+  #
+  # Excluded trees, none of which Finder ever displays:
+  #   $HOME/Library      application state — sandbox stores, caches, cloud
+  #                      mounts, simulator data. This is the single biggest
+  #                      walker and its .DS_Store files are all invisible.
+  #   $HOME/.*           tool/state dirs (~/.dartServer alone cost ~10 s to
+  #                      walk for zero results, plus ~/.pub-cache, ~/.vscode,
+  #                      ~/.gradle, ~/.Trash, …)
+  #   node_modules, .git build trees and object stores
+  #
+  # Together these turn a ~40 s whole-home walk into a couple of seconds while
+  # keeping every location Finder actually shows.
+  done < <(find "$HOME" -maxdepth 8 \
+    \( -path "$HOME/Library" \
+       -o -path "$HOME/.*" \
+       -o -name node_modules \
+       -o -name .git \) -prune -o \
+    -name ".DS_Store" -type f -print 2>/dev/null || true)
 
   _SYS_DSSTORE_TOTAL=$total_bytes
 
@@ -197,14 +212,127 @@ _osascript_timed() {
   perl -e 'alarm shift @ARGV; exec @ARGV' "$secs" osascript "$@" 2>/dev/null
 }
 
+# Items in ~/.Trash, read from the filesystem. One process (`ls`), no walk.
+#   - missing directory   -> 0    (verifiably empty)
+#   - present but unreadable -> "" (unknown; must never be read as "empty")
+# This is the fallback for when Finder refuses to answer, so it has to be able
+# to say "I don't know" — collapsing a permission error to 0 is the bug that let
+# a full Trash be reported as empty.
+system::_trash_fs_count() {
+  local dir="${HOME}/.Trash"
+  if [[ ! -e "$dir" ]]; then
+    printf '0\n'
+    return 0
+  fi
+
+  local listing
+  if ! listing=$(ls -A "$dir" 2>/dev/null); then
+    printf ''
+    return 0
+  fi
+
+  if [[ -z "$listing" ]]; then
+    printf '0\n'
+    return 0
+  fi
+
+  local n=0 entry
+  while IFS= read -r entry; do
+    n=$(( n + 1 ))
+  done <<< "$listing"
+  printf '%s\n' "$n"
+}
+
+# Item count in the Trash, or empty when it is genuinely unknown.
+#
+# Finder is authoritative — it sees every mounted volume's trash, not just
+# ~/.Trash — but it only answers when macOS has granted this process Automation
+# permission for Finder. A refused or timed-out query now falls through to the
+# filesystem count instead of being coerced to 0; and if the filesystem cannot
+# be read either, the answer is empty, never a fabricated "0".
+system::_trash_count() {
+  local from_finder
+  if from_finder=$(_osascript_timed 5 -e 'tell application "Finder" to count items in trash') \
+     && [[ "$from_finder" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$from_finder"
+    return 0
+  fi
+
+  system::_trash_fs_count
+}
+
+# Empty the Trash, then prove it. Sets:
+#   _SYS_TRASH_FREED      bytes that actually left the disk (0 in a preview)
+#   _SYS_TRASH_VERIFIED   true only when a re-query found the Trash empty
+#   _SYS_TRASH_REMAINING  items the re-query still saw, or "" if unknowable
+#
+# `tell application "Finder" to empty trash` exits 0 even when items remain
+# (locked files, a partially-refused Automation prompt, or an automation probe
+# that simply does nothing), so success is measured rather than assumed: the
+# count is re-queried afterwards, and anything still there is removed directly
+# so the user's explicit --empty-trash is still honoured. Nothing is ever
+# reported as emptied unless a re-query confirmed it.
+system::_trash_empty() {
+  local known_bytes="${1:-0}"
+  local freed_before=$TOTAL_FREED
+
+  _SYS_TRASH_FREED=0
+  _SYS_TRASH_VERIFIED=false
+  _SYS_TRASH_REMAINING=""
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    TOTAL_DRYRUN_BYTES=$(( TOTAL_DRYRUN_BYTES + known_bytes ))
+    _SYS_TRASH_FREED="$known_bytes"
+    return 0
+  fi
+
+  # Finder first — it respects locked files and macOS conventions.
+  _osascript_timed 10 -e 'tell application "Finder" to empty trash' >/dev/null 2>&1 || true
+
+  local after
+  after="$(system::_trash_count)"
+  local via_finder=true
+
+  if [[ "$after" != "0" ]]; then
+    via_finder=false
+    safe_rm_contents "${HOME}/.Trash" "Trash"
+    after="$(system::_trash_count)"
+  fi
+
+  if [[ "$via_finder" == "true" ]]; then
+    # Finder never touches TOTAL_FREED, so credit the pre-measured size — it is
+    # trustworthy now that a re-query proved the Trash empty.
+    _SYS_TRASH_FREED="$known_bytes"
+    TOTAL_FREED=$(( TOTAL_FREED + known_bytes ))
+  else
+    # The direct delete already recorded the real bytes through safe_rm.
+    _SYS_TRASH_FREED=$(( TOTAL_FREED - freed_before ))
+  fi
+
+  if [[ "$after" == "0" ]]; then
+    _SYS_TRASH_VERIFIED=true
+  elif [[ -n "$after" ]]; then
+    _SYS_TRASH_REMAINING="$after"
+  fi
+
+  # Let APFS settle so free-space reporting catches up.
+  sleep 1
+  return 0
+}
+
 system::_trash() {
   _SYS_TRASH_TOTAL=0
 
-  # Query item count via Finder — works even without Terminal Full Disk Access
-  # Timeout after 5 s so CI / headless runners don't hang
-  local trash_count=0
-  trash_count=$(_osascript_timed 5 -e 'tell application "Finder" to count items in trash') || trash_count=0
-  [[ "$trash_count" =~ ^[0-9]+$ ]] || trash_count=0
+  # Item count first — works even without Terminal Full Disk Access, but must
+  # never invent a number. An empty answer means "unknown", and saying "empty"
+  # then would be a lie.
+  local trash_count
+  trash_count="$(system::_trash_count)"
+
+  if [[ -z "$trash_count" ]]; then
+    log::info "Trash: item count unavailable — Finder did not answer and ~/.Trash is not readable."
+    return
+  fi
 
   if (( trash_count == 0 )); then
     log::info "Trash: empty."
@@ -214,7 +342,6 @@ system::_trash() {
   # Size is a best-effort upgrade over the count, never a precondition.
   local trash_size
   trash_size=$(system::_trash_size_bytes)
-  _SYS_TRASH_TOTAL=${trash_size:-0}
 
   local size_note=""
   if [[ -n "$trash_size" ]]; then
@@ -227,10 +354,11 @@ system::_trash() {
   # "do not ask me about cleanup", not "destroy recoverable data".
   if [[ "${EMPTY_TRASH:-false}" != "true" ]]; then
     log::info "Trash: $(system::_item_count_phrase "$trash_count")${size_note} — left alone"
-    # Gate on the count, not the size. Finder answers `get size of trash` with
+    # A Trash left alone frees nothing this run, so it must not inflate the
+    # module's scanned total (it was double-counted in the summary before).
+    # Gate on the count, not the size: Finder answers `get size of trash` with
     # the token `missing value` rather than a number, so a size-based gate
-    # silently dropped the Trash out of the decisions summary entirely — a user
-    # with 50 GB of it was told nothing.
+    # silently dropped the Trash out of the decisions summary entirely.
     utils::register_action \
       "$(system::_item_count_phrase "$trash_count") in the Trash" \
       "${trash_size:-0}" \
@@ -252,53 +380,22 @@ system::_trash() {
     log::warn "Emptying the Trash ($(system::_item_count_phrase "$trash_count")${size_note}) — --empty-trash and --yes both given."
   elif ! utils::confirm "Permanently empty the Trash ($(system::_item_count_phrase "$trash_count")${size_note})?"; then
     log::info "Trash: left alone."
-    _SYS_TRASH_TOTAL=0
     return
   fi
 
-  # Capture disk state before emptying
-  local freed_before_trash=$TOTAL_FREED
-  local dryrun_before_trash=$TOTAL_DRYRUN_BYTES
+  system::_trash_empty "${trash_size:-0}"
+  _SYS_TRASH_TOTAL="$_SYS_TRASH_FREED"
 
-  # Empty via Finder — respects locked files and macOS conventions
-  if _osascript_timed 10 -e 'tell application "Finder" to empty trash'; then
-    # Allow APFS to update free space reporting
-    sleep 1
-    # Since we can't capture bytes via safe_rm for the Finder AppleScript,
-    # we must default to adding the computed size manually.
-    if [[ "$DRY_RUN" != "true" ]]; then
-      TOTAL_FREED=$(( TOTAL_FREED + ${trash_size:-0} ))
-    fi
-    local disk_delta=${trash_size:-0}
-
-    # Use whichever is larger: Finder-reported size or actual disk delta
-    local known=${trash_size:-0}
-    local actual_freed=$(( known > disk_delta ? known : disk_delta ))
-    _SYS_TRASH_TOTAL=$actual_freed
-
-    if (( actual_freed > 0 )); then
-      log::success "Trash emptied (${trash_count} items, $(utils::format_bytes "$actual_freed") freed)"
+  if [[ "$_SYS_TRASH_VERIFIED" == "true" ]]; then
+    if (( _SYS_TRASH_FREED > 0 )); then
+      log::success "Trash emptied (${trash_count} items, $(utils::format_bytes "$_SYS_TRASH_FREED") freed)"
     else
       log::success "Trash emptied (${trash_count} items)"
     fi
+  elif [[ -n "$_SYS_TRASH_REMAINING" ]]; then
+    log::warn "Trash: $(system::_item_count_phrase "$_SYS_TRASH_REMAINING") remain after emptying — check for locked files or Finder permissions"
   else
-    # Fallback: direct delete if Finder call fails or times out
-    local freed_before_fallback=$TOTAL_FREED
-    local dryrun_before_fallback=$TOTAL_DRYRUN_BYTES
-    safe_rm_contents "${HOME}/.Trash" "Trash"
-    sleep 1
-    local fallback_freed=$(( TOTAL_FREED - freed_before_fallback ))
-    if [[ "$DRY_RUN" == "true" ]]; then
-      fallback_freed=$(( TOTAL_DRYRUN_BYTES - dryrun_before_fallback ))
-    fi
-    
-    _SYS_TRASH_TOTAL=$fallback_freed
-
-    if (( fallback_freed > 0 )); then
-      log::success "Trash emptied (${trash_count} items, $(utils::format_bytes "$fallback_freed") freed)"
-    else
-      log::success "Trash emptied (${trash_count} items)"
-    fi
+    log::warn "Trash: emptying was requested but could not be verified as empty"
   fi
 }
 
@@ -306,13 +403,16 @@ system::_trash() {
 system::_dev_tool_caches() {
   _SYS_DEVCACHE_TOTAL=0
 
+  # Each path is measured once — by safe_rm, whose result comes back in
+  # SAFE_RM_LAST_BYTES. The old code ran `du` first and then let safe_rm run it
+  # again, and it added the pre-measured size even when the path was whitelisted
+  # or protected and nothing was freed, so the module over-reported.
+
   # npm cache
   local npm_cache="$HOME/.npm/_cacache"
   if [[ -d "$npm_cache" ]]; then
-    local npm_bytes
-    npm_bytes=$(utils::get_size_bytes "$npm_cache")
-    _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + npm_bytes ))
     safe_rm "$npm_cache" "npm cache"
+    _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + SAFE_RM_LAST_BYTES ))
   else
     log::verbose "npm cache not found — skipping."
   fi
@@ -320,37 +420,28 @@ system::_dev_tool_caches() {
   # npm npx cache
   local npx_cache="$HOME/.npm/_npx"
   if [[ -d "$npx_cache" ]]; then
-    local npx_bytes
-    npx_bytes=$(utils::get_size_bytes "$npx_cache")
-    if (( npx_bytes > 0 )); then
-      _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + npx_bytes ))
-        safe_rm "$npx_cache" "npm npx cache"
-    fi
+    safe_rm "$npx_cache" "npm npx cache"
+    _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + SAFE_RM_LAST_BYTES ))
   fi
 
   # npm logs
   local npm_logs="$HOME/.npm/_logs"
   if [[ -d "$npm_logs" ]]; then
-    local npm_logs_bytes
-    npm_logs_bytes=$(utils::get_size_bytes "$npm_logs")
-    if (( npm_logs_bytes > 0 )); then
-      _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + npm_logs_bytes ))
-        safe_rm "$npm_logs" "npm logs"
-    fi
+    safe_rm "$npm_logs" "npm logs"
+    _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + SAFE_RM_LAST_BYTES ))
   fi
 
   # pip cache
   local pip_cache="$HOME/Library/Caches/pip"
   if [[ -d "$pip_cache" ]]; then
-    local pip_bytes
-    pip_bytes=$(utils::get_size_bytes "$pip_cache")
-    _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + pip_bytes ))
     safe_rm "$pip_cache" "pip cache"
+    _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + SAFE_RM_LAST_BYTES ))
   else
     log::verbose "pip cache not found — skipping."
   fi
 
-  # Go cache
+  # Go cache — no safe_rm path: deletion goes through `go clean -cache`, so the
+  # size still has to be measured directly.
   if command -v go &>/dev/null; then
     local go_cache
     go_cache=$(go env GOCACHE 2>/dev/null || true)
@@ -368,45 +459,29 @@ system::_dev_tool_caches() {
   # Google Cloud SDK logs
   local gcloud_logs="$HOME/.config/gcloud/logs"
   if [[ -d "$gcloud_logs" ]]; then
-    local gcloud_logs_bytes
-    gcloud_logs_bytes=$(utils::get_size_bytes "$gcloud_logs")
-    if (( gcloud_logs_bytes > 0 )); then
-      _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + gcloud_logs_bytes ))
-        safe_rm "$gcloud_logs" "Google Cloud logs"
-    fi
+    safe_rm "$gcloud_logs" "Google Cloud logs"
+    _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + SAFE_RM_LAST_BYTES ))
   fi
 
   # Google Cloud SDK cache
   local gcloud_cache="$HOME/.config/gcloud/.cache"
   if [[ -d "$gcloud_cache" ]]; then
-    local gcloud_cache_bytes
-    gcloud_cache_bytes=$(utils::get_size_bytes "$gcloud_cache")
-    if (( gcloud_cache_bytes > 0 )); then
-      _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + gcloud_cache_bytes ))
-        safe_rm "$gcloud_cache" "Google Cloud cache"
-    fi
+    safe_rm "$gcloud_cache" "Google Cloud cache"
+    _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + SAFE_RM_LAST_BYTES ))
   fi
 
   # Kubernetes client cache
   local kube_cache="$HOME/.kube/cache"
   if [[ -d "$kube_cache" ]]; then
-    local kube_bytes
-    kube_bytes=$(utils::get_size_bytes "$kube_cache")
-    if (( kube_bytes > 0 )); then
-      _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + kube_bytes ))
-        safe_rm "$kube_cache" "Kubernetes cache"
-    fi
+    safe_rm "$kube_cache" "Kubernetes cache"
+    _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + SAFE_RM_LAST_BYTES ))
   fi
 
   # AWS CLI cache
   local aws_cache="$HOME/.aws/cli/cache"
   if [[ -d "$aws_cache" ]]; then
-    local aws_bytes
-    aws_bytes=$(utils::get_size_bytes "$aws_cache")
-    if (( aws_bytes > 0 )); then
-      _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + aws_bytes ))
-        safe_rm "$aws_cache" "AWS CLI cache"
-    fi
+    safe_rm "$aws_cache" "AWS CLI cache"
+    _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + SAFE_RM_LAST_BYTES ))
   fi
 }
 
@@ -418,22 +493,24 @@ system::_var_folders() {
   local user_tmp
   user_tmp=$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)
   [[ -n "$user_tmp" && -d "$user_tmp" ]] || return 0
+  user_tmp="${user_tmp%/}"
 
   local total=0
 
-  # Only clean known-safe subdirs, never the root
+  # Only clean known-safe subdirs, never the root.
+  #
+  # Search is scoped to the current user's own DARWIN_USER_TEMP_DIR rather than
+  # all of /private/var/folders — the old sweep walked every user's temp trees
+  # (and anything else mounted there) for a path it was already told.
   local -a safe_subdirs=("TemporaryItems" "Cleanup At Startup" "-Tmp-")
   for subdir in "${safe_subdirs[@]}"; do
-    # Find matching dirs under var/folders (one level of UUID dirs)
     while IFS= read -r target; do
       [[ -d "$target" ]] || continue
-      local size
-      size=$(utils::get_size_bytes "$target")
-      (( size > 0 )) || continue
-      log::verbose "  var/folders temp: $(utils::format_bytes "$size") ($subdir)"
       safe_rm "$target" "var/folders temp ($subdir)" "silent"
+      (( SAFE_RM_LAST_BYTES > 0 )) || continue
+      log::verbose "  var/folders temp: $(utils::format_bytes "$SAFE_RM_LAST_BYTES") ($subdir)"
       total=$(( total + SAFE_RM_LAST_BYTES ))
-    done < <(find /private/var/folders -maxdepth 4 -name "$subdir" -type d 2>/dev/null || true)
+    done < <(find "$user_tmp" -maxdepth 2 -name "$subdir" -type d 2>/dev/null || true)
   done
 
   _SYS_VARFOLDERS_TOTAL=$total

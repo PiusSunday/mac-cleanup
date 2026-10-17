@@ -148,7 +148,7 @@ _make_project() {
   PURGE_STALE=false
   ACTION_LABELS=(); ACTION_BYTES=(); ACTION_COMMANDS=()
 
-  run devtools::_node_modules
+  run devtools::_stale_artifacts
   [ "$status" -eq 0 ]
   [[ "$output" == *"dormant/node_modules"* ]]
   [[ "$output" == *"1 in inactive projects"* ]]
@@ -160,7 +160,7 @@ _make_project() {
   STALE_PROJECT_DAYS=90
   PURGE_STALE=false
 
-  run devtools::_node_modules
+  run devtools::_stale_artifacts
   [[ "$output" == *"none"* ]]
   [[ "$output" != *"active/node_modules"* ]]
 }
@@ -173,11 +173,11 @@ _make_project() {
   DRY_RUN=false
   ACTION_LABELS=(); ACTION_BYTES=(); ACTION_COMMANDS=()
 
-  devtools::_node_modules >/dev/null 2>&1
+  devtools::_stale_artifacts >/dev/null 2>&1
 
   # Nothing deleted, and it does not inflate this run's reclaimable total.
   [ -d "$HOME/Developer/dormant/node_modules" ]
-  [ "$_DEV_NODE_TOTAL" -eq 0 ]
+  [ "$_DEV_ARTIFACT_TOTAL" -eq 0 ]
   # It is offered as a decision instead.
   [ "${#ACTION_LABELS[@]}" -eq 1 ]
   [[ "${ACTION_COMMANDS[0]}" == *"--purge-stale"* ]]
@@ -191,11 +191,11 @@ _make_project() {
   PURGE_STALE=true
   DRY_RUN=false
 
-  devtools::_node_modules >/dev/null 2>&1
+  devtools::_stale_artifacts >/dev/null 2>&1
 
   [ ! -d "$HOME/Developer/dormant/node_modules" ]
   [ -d "$HOME/Developer/active/node_modules" ]
-  [ "$_DEV_NODE_TOTAL" -gt 0 ]
+  [ "$_DEV_ARTIFACT_TOTAL" -gt 0 ]
 }
 
 @test "devtools: the staleness threshold is configurable" {
@@ -204,11 +204,11 @@ _make_project() {
   PURGE_STALE=false
 
   STALE_PROJECT_DAYS=200
-  run devtools::_node_modules
+  run devtools::_stale_artifacts
   [[ "$output" == *"none"* ]]
 
   STALE_PROJECT_DAYS=30
-  run devtools::_node_modules
+  run devtools::_stale_artifacts
   [[ "$output" == *"midaged/node_modules"* ]]
 }
 
@@ -219,7 +219,7 @@ _make_project() {
   STALE_PROJECT_DAYS=90
   PURGE_STALE=false
 
-  run devtools::_node_modules
+  run devtools::_stale_artifacts
   [[ "$output" == *"rustproj/target"* ]]
   [[ "$output" == *"webproj/.next"* ]]
 }
@@ -238,7 +238,7 @@ _make_project() {
   PURGE_STALE=false
 
   # pubspec.yaml is fresh, so the whole app is active.
-  run devtools::_node_modules
+  run devtools::_stale_artifacts
   [[ "$output" != *".gradle"* ]]
   [[ "$output" != *"20685"* ]]
 }
@@ -252,7 +252,7 @@ _make_project() {
   STALE_PROJECT_DAYS=90
   PURGE_STALE=false
 
-  run devtools::_node_modules
+  run devtools::_stale_artifacts
   [ "$status" -eq 0 ]
   [[ "$output" != *"untouched 2"*"d)"* ]] || [[ "$output" == *"none"* ]]
   [[ "$output" != *"20685"* ]]
@@ -274,7 +274,7 @@ _make_project() {
   STALE_PROJECT_DAYS=90
   PURGE_STALE=false
 
-  run devtools::_node_modules
+  run devtools::_stale_artifacts
   [[ "$output" == *"appone/android/.gradle"* ]]
   [[ "$output" == *"apptwo/android/.gradle"* ]]
 }

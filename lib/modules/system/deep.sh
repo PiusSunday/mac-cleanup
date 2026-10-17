@@ -211,7 +211,7 @@ system_deep::_os_installer_leftovers() {
     local size
     size=$(utils::get_size_bytes "$installer")
     system_deep::_add_scanned "$size"
-    safe_rm "$installer" "Old macOS installer: $(basename "$installer")"
+    safe_rm "$installer" "Old macOS installer: $(utils::basename "$installer")" "" "$size"
   done
   shopt -u nullglob
 
@@ -223,9 +223,9 @@ system_deep::_os_installer_leftovers() {
       size=$(utils::get_size_bytes "/macOS Install Data")
       system_deep::_add_scanned "$size"
       if [[ "${_SYSTEM_DEEP_CAN_USE_SUDO:-false}" == "true" ]]; then
-        safe_rm "/macOS Install Data" "macOS Install Data" "sudo"
+        safe_rm "/macOS Install Data" "macOS Install Data" "sudo" "$size"
       else
-        safe_rm "/macOS Install Data" "macOS Install Data"
+        safe_rm "/macOS Install Data" "macOS Install Data" "" "$size"
       fi
     fi
   fi
@@ -238,7 +238,7 @@ system_deep::_safari_content_cache() {
   local size
   size=$(utils::get_size_bytes "$safari_cache")
   system_deep::_add_scanned "$size"
-  safe_rm "$safari_cache" "Safari content cache"
+  safe_rm "$safari_cache" "Safari content cache" "" "$size"
 }
 
 system_deep::_browser_code_sign_caches() {

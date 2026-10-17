@@ -62,7 +62,7 @@ xcode::_derived_data() {
   local size_bytes
   size_bytes=$(utils::get_size_bytes "$path")
   MODULE_XCODE_SCANNED=$(( MODULE_XCODE_SCANNED + size_bytes ))
-  safe_rm "$path" "Xcode DerivedData"
+  safe_rm "$path" "Xcode DerivedData" "" "$size_bytes"
 }
 
 # Only archives older than 90 days are removed, so only those are counted.
@@ -83,7 +83,7 @@ xcode::_archives() {
     size=$(utils::get_size_bytes "$archive")
     total_bytes=$(( total_bytes + size ))
     (( eligible++ )) || true
-    safe_rm "$archive" "Xcode archive: $(basename "$archive")"
+    safe_rm "$archive" "Xcode archive: $(utils::basename "$archive")" "" "$size"
   done < <(find "$path" -name "*.xcarchive" -mtime +90 -print 2>/dev/null || true)
 
   MODULE_XCODE_SCANNED=$(( MODULE_XCODE_SCANNED + total_bytes ))
@@ -106,7 +106,7 @@ xcode::_device_support() {
   local size_bytes
   size_bytes=$(utils::get_size_bytes "$path")
   MODULE_XCODE_SCANNED=$(( MODULE_XCODE_SCANNED + size_bytes ))
-  safe_rm "$path" "Xcode DeviceSupport"
+  safe_rm "$path" "Xcode DeviceSupport" "" "$size_bytes"
 }
 
 xcode::_simulator_caches() {
@@ -118,7 +118,7 @@ xcode::_simulator_caches() {
   local size_bytes
   size_bytes=$(utils::get_size_bytes "$path")
   MODULE_XCODE_SCANNED=$(( MODULE_XCODE_SCANNED + size_bytes ))
-  safe_rm "$path" "CoreSimulator caches"
+  safe_rm "$path" "CoreSimulator caches" "" "$size_bytes"
 }
 
 # Device pruning has a single owner: xcode::_simulator_devices, which runs after
@@ -145,7 +145,7 @@ xcode::_documentation_cache() {
     local size
     size=$(utils::get_size_bytes "$p")
     MODULE_XCODE_SCANNED=$(( MODULE_XCODE_SCANNED + size ))
-    safe_rm "$p" "Xcode $(basename "$p")"
+    safe_rm "$p" "Xcode $(utils::basename "$p")" "" "$size"
   done
 }
 
@@ -162,7 +162,7 @@ xcode::_device_logs() {
     local size
     size=$(utils::get_size_bytes "$p")
     MODULE_XCODE_SCANNED=$(( MODULE_XCODE_SCANNED + size ))
-    safe_rm "$p" "Xcode $(basename "$p")"
+    safe_rm "$p" "Xcode $(utils::basename "$p")" "" "$size"
   done
 }
 
