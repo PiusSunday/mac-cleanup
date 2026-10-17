@@ -48,7 +48,7 @@ system_deep::clean() {
     projected="$freed"
   fi
 
-  module_summary "Deep System" "$_SYSTEM_DEEP_TOTAL"
+  module_summary "Deep System" "$_SYSTEM_DEEP_TOTAL" "$projected"
 
   local status="clean"
   if (( _SYSTEM_DEEP_TOTAL > 0 )); then

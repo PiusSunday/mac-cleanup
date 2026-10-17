@@ -51,8 +51,6 @@ orphans::clean() {
     projected="$freed"
   fi
 
-  module_summary "Orphans" "$_ORPHAN_TOTAL"
-
   local status="clean"
   projected=0
   if [[ "$CLEAN_ORPHANS" == "true" ]]; then
@@ -67,6 +65,10 @@ orphans::clean() {
   elif (( _ORPHAN_TOTAL > 0 )); then
     status="review"
   fi
+
+  # Reported after the opt-in decision: without --clean-orphans the reclaimable
+  # figure is 0 and the line must say what was found rather than what it frees.
+  module_summary "Orphans" "$_ORPHAN_TOTAL" "$projected"
 
   utils::register_module "Orphans" "System" "$_ORPHAN_TOTAL" "$freed" "$status" "$projected"
 }

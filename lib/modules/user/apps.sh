@@ -22,7 +22,7 @@ apps::clean() {
     projected="$freed"
   fi
 
-  module_summary "Apps & Containers" "$_APPS_TOTAL"
+  module_summary "Apps & Containers" "$_APPS_TOTAL" "$projected"
 
   local status="clean"
   if (( _APPS_TOTAL > 0 )); then status="$_APPS_TOTAL"; fi

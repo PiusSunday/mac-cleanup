@@ -32,7 +32,7 @@ xcode::clean() {
     projected="$freed"
   fi
 
-  module_summary "Xcode" "$MODULE_XCODE_SCANNED"
+  module_summary "Xcode" "$MODULE_XCODE_SCANNED" "$projected"
 
   local status="clean"
   if (( MODULE_XCODE_SCANNED > 0 )); then

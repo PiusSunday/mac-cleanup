@@ -46,7 +46,7 @@ caches::clean() {
     projected="$freed"
   fi
 
-  module_summary "Caches" "$module_scanned"
+  module_summary "Caches" "$module_scanned" "$projected"
 
   local status="clean"
   if (( module_scanned > 0 )); then
@@ -342,7 +342,7 @@ caches::_shell_caches() {
     local size
     size=$(utils::get_size_bytes "$zcomp")
     total=$(( total + size ))
-    safe_rm "$zcomp" "zsh completion cache" "" "$size"
+    safe_rm "$zcomp" "zsh completion cache: $(utils::basename "$zcomp")" "" "$size"
   done < <(find "$HOME" -maxdepth 1 -name ".zcompdump*" -type f 2>/dev/null || true)
 
   # Oh My Zsh cache — delete contents, not the directory itself

@@ -38,7 +38,7 @@ system::clean() {
     projected="$freed"
   fi
 
-  module_summary "System" "$module_scanned"
+  module_summary "System" "$module_scanned" "$projected"
 
   # Determine status
   local status="clean"
@@ -440,17 +440,32 @@ system::_dev_tool_caches() {
     log::verbose "pip cache not found — skipping."
   fi
 
-  # Go cache — no safe_rm path: deletion goes through `go clean -cache`, so the
-  # size still has to be measured directly.
+  # Go cache — deletion goes through `go clean -cache` rather than safe_rm, so
+  # the bytes are measured here and credited explicitly. Two consequences worth
+  # stating:
+  #   * a live `--system` frees the cache but used to report none of it, so the
+  #     module's figure disagreed with the report by the whole cache size;
+  #   * `--all` reaches the same directory again in the Caches sweep, so the path
+  #     is claimed first to keep it from being listed and counted twice.
   if command -v go &>/dev/null; then
     local go_cache
     go_cache=$(go env GOCACHE 2>/dev/null || true)
-    if [[ -n "$go_cache" && -d "$go_cache" ]]; then
+    if [[ -n "$go_cache" && -d "$go_cache" ]] && protect::claim "$go_cache"; then
       local go_bytes
       go_bytes=$(utils::get_size_bytes "$go_cache")
       _SYS_DEVCACHE_TOTAL=$(( _SYS_DEVCACHE_TOTAL + go_bytes ))
       log::info "Go build cache: $(utils::format_bytes "$go_bytes")"
-      dry_run_or_exec go clean -cache
+      if [[ "$DRY_RUN" == "true" ]]; then
+        TOTAL_DRYRUN_BYTES=$(( TOTAL_DRYRUN_BYTES + go_bytes ))
+        log::info "[DRY-RUN] Would execute: go clean -cache"
+      else
+        dry_run_or_exec go clean -cache
+        # Credit what actually left the disk rather than the pre-measured size.
+        local go_after
+        go_after=$(utils::get_size_bytes "$go_cache")
+        local go_freed=$(( go_bytes - go_after ))
+        (( go_freed > 0 )) && TOTAL_FREED=$(( TOTAL_FREED + go_freed ))
+      fi
     fi
   else
     log::verbose "Go not installed — skipping."

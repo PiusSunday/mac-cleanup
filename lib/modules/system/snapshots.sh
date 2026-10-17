@@ -25,7 +25,7 @@ snapshots::clean() {
   if [[ -z "$snapshots" ]]; then
     log::info "No local snapshots found."
     snapshots::_in_progress
-    module_summary "Snapshots" "0"
+    module_summary "Snapshots" 0 0
     utils::register_module "Snapshots" "Storage Management" "0" "0" "clean"
     return 0
   fi
@@ -54,7 +54,7 @@ snapshots::clean() {
   if (( count > 0 )); then
     log::success "  Snapshots → ${count} local snapshot(s)"
   else
-    module_summary "Snapshots" "$projected"
+    module_summary "Snapshots" "$projected" "$projected"
   fi
 
   local status="clean"

@@ -48,9 +48,29 @@ Behaviour that scripts and habits from v0.5.0 may depend on:
 - **A stale Time Machine `inProgress` backup could block an unattended run** on a password prompt.
   The delete now requires sudo to be already available (`sudo -n true`), matching `deep.sh`, and
   otherwise warns instead of hanging.
+- **A module's closing line overstated what it would reclaim.** Each module printed its *scanned*
+  total but labelled it "reclaimable", so `System` announced 970 MB while the summary table — which
+  is fed the projected figure — said 268 MB in the same run. The line now carries both numbers and
+  reports the reclaimable figure the table will show, naming the scanned total only when the two
+  differ.
+- **Report-only modules read as if they would be cleaned.** `Orphans` closed with "16 KB
+  reclaimable" and `Docker` with "Nothing to clean" while both sat under "Needs review" with real
+  bytes listed above them. A module that found something it will not remove now says
+  "… found — needs review", matching the report.
+- **The Go build cache was credited to the wrong module, or to none at all.** `go clean -cache` is
+  not a `safe_rm` path, so its bytes never reached the freed or preview totals: a live `--system`
+  emptied the cache but reported none of it, and a `--all` dry run counted the same directory twice
+  — once in the System preview and once in the Caches sweep. The path is now claimed before deletion
+  so the later Caches sweep skips it, and the bytes are measured before and after and credited.
 
 ### Changed
 
+- **A module's closing line says "reclaimed" after a live run**, matching the report footer, instead
+  of calling already-freed bytes "reclaimable".
+- **The two zsh completion caches are named individually** rather than both appearing as
+  "zsh completion cache".
+- **The "Skipped" line no longer prints zero-valued parts.** A run that deduplicated one path but
+  protected none read "0 paths protected by policy, 1 counted by another module".
 - **The `.DS_Store` sweep no longer descends into `~/Library`, `$HOME/.*`, `node_modules` or
   `.git`.** Those files exist but Finder never displays them, so nothing a user can see is skipped.
   The pass used `-not -path` (which still walked every excluded tree and then discarded the results)

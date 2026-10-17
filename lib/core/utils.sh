@@ -768,14 +768,37 @@ log::category() {
 }
 
 # ── Module summary line ──────────────────────────────────────────────────────
-# Print a one-line result at the end of each module's output.
+# One line at the end of every module. It reports two numbers that are often
+# different and were previously conflated:
+#   found       what the module located (may include report-only candidates)
+#   reclaimable what a live run would actually free (defaults to `found`)
+# The reclaimable figure is the same one `utils::register_module` hands the
+# summary table, so a module line and its report row can never disagree.
 module_summary() {
   local name="$1"
-  local bytes="${2:-0}"
-  if (( bytes == 0 )); then
-    log::success "  ${name} → Nothing to clean"
+  local found="${2:-0}"
+  local reclaimable="${3:-$found}"
+  [[ "$found" =~ ^[0-9]+$ ]] || found=0
+  [[ "$reclaimable" =~ ^[0-9]+$ ]] || reclaimable=0
+
+  if (( reclaimable == 0 )); then
+    if (( found == 0 )); then
+      log::success "  ${name} → Nothing to clean"
+    else
+      # Something was found that this run will not remove on its own — the
+      # decisions block below carries it. "needs review" matches the report.
+      log::success "  ${name} → $(utils::format_bytes "$found") found — needs review"
+    fi
+    return 0
+  fi
+
+  local verb="reclaimable"
+  [[ "$DRY_RUN" == "true" ]] || verb="reclaimed"
+
+  if (( reclaimable >= found )); then
+    log::success "  ${name} → $(utils::format_bytes "$reclaimable") ${verb}"
   else
-    log::success "  ${name} → $(utils::format_bytes "$bytes") reclaimable"
+    log::success "  ${name} → $(utils::format_bytes "$reclaimable") ${verb} of $(utils::format_bytes "$found") found"
   fi
 }
 

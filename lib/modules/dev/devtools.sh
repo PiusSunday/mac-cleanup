@@ -124,7 +124,7 @@ devtools::clean() {
     projected="$freed"
   fi
 
-  module_summary "Dev Artifacts" "$module_scanned"
+  module_summary "Dev Artifacts" "$module_scanned" "$projected"
 
   local status="clean"
   if (( module_scanned > 0 )); then

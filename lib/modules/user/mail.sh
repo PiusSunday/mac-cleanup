@@ -24,7 +24,7 @@ mail::clean() {
     projected="$freed"
   fi
 
-  module_summary "Mail" "$_MAIL_TOTAL"
+  module_summary "Mail" "$_MAIL_TOTAL" "$projected"
 
   local status="clean"
   if (( _MAIL_TOTAL > 0 )); then

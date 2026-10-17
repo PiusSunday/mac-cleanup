@@ -25,7 +25,7 @@ browsers::clean() {
     projected="$freed"
   fi
 
-  module_summary "Browsers" "$_BROWSERS_TOTAL"
+  module_summary "Browsers" "$_BROWSERS_TOTAL" "$projected"
 
   local status="clean"
   if (( _BROWSERS_TOTAL > 0 )); then status="$_BROWSERS_TOTAL"; fi
