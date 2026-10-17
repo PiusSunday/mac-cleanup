@@ -7,7 +7,7 @@ export VERBOSE=${VERBOSE:-false}
 export SKIP_CONFIRM=${SKIP_CONFIRM:-false}
 
 # ── Global Constants ───────────────────────────────────────────────────────────
-VERSION="0.6.0"
+VERSION="0.7.0"
 LOG_DIR="$HOME/.mac-cleanup"
 LOG_FILE="$LOG_DIR/cleanup.log"
 
@@ -28,6 +28,12 @@ export TARGET_CACHES=false
 export TARGET_BREW=false
 export TARGET_MAIL=false
 export TARGET_SYSTEM_DEEP=false
+
+# Opt-in to flushing Apple's Content Caching store — a system-owned copy of
+# software updates and iCloud content this Mac cached for other devices on the
+# network. Off by default: it lives in /Library, needs admin rights, and may be
+# serving other machines.
+export TARGET_CONTENT_CACHE=${TARGET_CONTENT_CACHE:-false}
 
 # Tracking — accumulate bytes freed across modules
 export TOTAL_FREED=0

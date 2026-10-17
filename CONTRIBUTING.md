@@ -187,7 +187,7 @@ silently keeps serving the previous version. Update it by hand rather than re-ta
 
 ```bash
 # In a checkout of PiusSunday/homebrew-mac-cleanup
-TAG=v0.6.0
+TAG=v0.7.0
 ASSET=mac-cleanup-${TAG#v}.tar.gz
 SHA=$(curl -sL "https://github.com/PiusSunday/mac-cleanup/releases/download/${TAG}/${ASSET}" \
   | shasum -a 256 | awk '{print $1}')

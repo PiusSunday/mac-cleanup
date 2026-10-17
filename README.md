@@ -37,6 +37,7 @@ Macs aren't designed to naturally tidy up after developers. Whether you're build
 | `--devtools`     | Dev Artifacts | Rust `target/`, Python `__pycache__`, Flutter, Gradle, Ruby, editor caches; reports stale project artifacts | 5–60 GB         |
 | `--purge-stale`  | Dev Artifacts | `node_modules`, `target`, `build`, `dist`, `.next`, `.dart_tool` in projects untouched 90+ days | 1–50 GB         |
 | `--snapshots`    | Snapshots     | Local Time Machine snapshots & stale `.inProgress` backups                                                                     | 5–20 GB         |
+| `--content-cache`| Content Caching | Apple's Content Caching store — software updates and iCloud content this Mac cached for other devices. Reports unless passed; needs admin rights. | 5–100+ GB |
 | `--caches`       | Caches        | ~/Library/Caches, Application Support caches/logs, Saved App State, Zsh, JetBrains                                             | 2–15 GB         |
 | `--mail`         | Mail          | Old Mail Downloads attachments and recent-item metadata                                                                        | 0.5–10 GB       |
 | `--brew`         | Homebrew      | Cached downloads, outdated versions, unused dependencies                                                                       | 1–5 GB          |
@@ -48,6 +49,17 @@ Macs aren't designed to naturally tidy up after developers. Whether you're build
 The `--system` module also surfaces paths that contribute to the "System Data" bar in macOS Storage settings — but **never deletes them**. These include the Rosetta translation cache and legacy iOS firmware files. Each finding includes the path and a suggestion for how to investigate.
 
 Simulator runtimes are no longer only reported: `--simulators` removes the ones macOS has superseded, keeping the newest runtime for every platform.
+
+---
+
+## Upgrading from v0.6.x
+
+v0.7.0 is additive: nothing that worked before changes behaviour.
+
+`--content-cache` is new. It flushes Apple's Content Caching store — the system-owned copy of
+software updates and iCloud content this Mac cached for other devices on the network. The store
+lives in `/Library` and needs admin rights, so `--system` and `--all` only measure it and report
+what it holds; they never flush it.
 
 ---
 
@@ -175,7 +187,7 @@ mac-cleanup --version
 ### Expected output
 
 ```text
-🧹 mac-cleanup v0.6.0
+🧹 mac-cleanup v0.7.0
 ⚠  DRY-RUN mode — no files will be deleted
 
   Apple Silicon  |  macOS 26.5  |  Free: 203.4 GB  |  User mode
@@ -199,7 +211,7 @@ mac-cleanup --version
 ⚠   3 superseded runtime(s) found — not removed without --simulators.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  🧹 mac-cleanup v0.6.0  ·  dry run  ·  27s
+  🧹 mac-cleanup v0.7.0  ·  dry run  ·  27s
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   MODULE                  RECLAIMABLE   ITEMS
@@ -214,6 +226,7 @@ mac-cleanup --version
   Total                      183.4 MB     252
 
   Already clean   Orphans, Docker, Apps & Containers, Mail, Snapshots
+  Unavailable     Content Caching
   Skipped         6 paths protected by policy, 4 counted by another module
 
   NEEDS YOUR DECISION
@@ -277,6 +290,7 @@ each one individually. Nothing is ever truncated.
 | `--include-system-caches` | — | false   | Also purge `~/Library/Caches/com.apple.*` (rebuilt by macOS; off by default)                    |
 | `--purge-stale`       | —     | false   | Delete build artifacts in projects untouched for 90+ days                                        |
 | `--empty-trash`       | —     | false   | Empty the Trash — user data; `--yes` alone never reaches it                                      |
+| `--content-cache`     | —     | false   | Flush Apple's Content Caching store — needs admin rights; only reported unless passed            |
 | `--stale-days`        | —     | 90      | Days of inactivity before a project's build artifacts count as stale                             |
 | `--show-log`          | —     | false   | Print operation log from `~/.mac-cleanup/operations.log` and exit                               |
 | `--version`           | `-V`  | false   | Print the current mac-cleanup version and exit                                                  |
@@ -350,6 +364,14 @@ therefore never reachable through it:
 Both are reported as decisions instead, with the command that would act on them. macOS will not
 report the size of the Trash — Finder answers `get size of trash` with `missing value` — so the
 decision names the item count and shows `size n/a` rather than dropping the entry.
+
+### System-owned stores need admin rights
+
+Apple's Content Caching store lives in `/Library`, not in `$HOME`, and belongs to a service that
+may be feeding other devices on the network. `--system` and `--all` measure it and report the
+figure, but only `--content-cache` flushes it. That flush needs admin rights, which it requests the
+way the deep sweep does; if they are not granted the store is left alone and the finding is listed
+as a decision with the command that works non-interactively.
 
 ### Targets mean what they say
 

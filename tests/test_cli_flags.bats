@@ -55,14 +55,14 @@ _timed() {
   run "$PROJECT_ROOT/bin/mac-cleanup" --version
 
   [ "$status" -eq 0 ]
-  [ "$output" = "mac-cleanup v0.6.0" ]
+  [ "$output" = "mac-cleanup v0.7.0" ]
 }
 
 @test "cli: -V prints version and exits" {
   run "$PROJECT_ROOT/bin/mac-cleanup" -V
 
   [ "$status" -eq 0 ]
-  [ "$output" = "mac-cleanup v0.6.0" ]
+  [ "$output" = "mac-cleanup v0.7.0" ]
 }
 # ── Target gating ─────────────────────────────────────────────────────────────
 # system::clean and orphans::clean used to run above the gating, so any target
@@ -104,4 +104,20 @@ _timed() {
   [[ "$output" == *"--empty-trash"* ]]
   [[ "$output" == *"--yes alone never reaches it"* ]]
   [[ "$output" == *"Prompts unless --yes is also passed"* ]]
+}
+
+@test "cli: --content-cache is documented and does not drag in the system sweep" {
+  run "$PROJECT_ROOT/bin/mac-cleanup" --help
+  [[ "$output" == *"--content-cache"* ]]
+  [[ "$output" == *"Content Caching store"* ]]
+}
+
+@test "cli: --content-cache enables only its own target" {
+  run bash -c '
+    source "$1/bin/mac-cleanup"
+    parse_flags --content-cache --dry-run >/dev/null 2>&1
+    printf "%s|%s|%s\n" "$TARGET_CONTENT_CACHE" "$TARGET_SYSTEM" "$DRY_RUN"
+  ' _ "$PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true|false|true" ]
 }
