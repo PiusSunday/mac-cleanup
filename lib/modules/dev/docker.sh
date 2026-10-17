@@ -56,7 +56,12 @@ docker::clean() {
   if (( docker_usage > 0 )); then
     log::info "Docker reclaimable: $(utils::format_bytes "$docker_usage")"
   fi
-  module_summary "Docker" "$docker_usage"
+  # Unused-but-tagged images are not auto-removed, but they are the reason a
+  # "Nothing to clean" line would read as a contradiction beside the 700 MB the
+  # block above just listed, so they count as found.
+  local found_bytes="$docker_usage"
+  [[ "$unused_bytes" =~ ^[0-9]+$ ]] && found_bytes=$(( docker_usage + unused_bytes ))
+  module_summary "Docker" "$found_bytes" "$projected"
 
   local status="clean"
   if (( docker_usage > 0 )); then

@@ -83,24 +83,34 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - name: Check out source formula
+        uses: actions/checkout@v5
+        with:
+          path: source
+
+      - name: Check out tap
+        uses: actions/checkout@v5
         with:
           repository: PiusSunday/homebrew-mac-cleanup
           token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          path: tap
 
       - name: Update Formula
         run: |
           TAG="${{ needs.release.outputs.tag }}"
           SHA="${{ needs.release.outputs.sha256 }}"
-          FORMULA="Formula/mac-cleanup.rb"
+          FORMULA="tap/Formula/mac-cleanup.rb"
 
-          # Replace url and sha256
+          # The repository formula is the source of truth. Copy it wholesale so
+          # that install/test changes propagate to the tap, then pin the tag.
+          cp source/Formula/mac-cleanup.rb "$FORMULA"
           sed -i "s|url \".*\"|url \"https://github.com/PiusSunday/mac-cleanup/archive/refs/tags/${TAG}.tar.gz\"|" "$FORMULA"
           sed -i "s/sha256 \".*\"/sha256 \"${SHA}\"/" "$FORMULA"
 
+          cd tap
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$FORMULA"
+          git add Formula/mac-cleanup.rb
 
           # Skip commit if Formula is already up to date (e.g., manually updated)
           if git diff --cached --quiet; then

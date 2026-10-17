@@ -4,6 +4,7 @@
 readonly ORPHAN_AGE_DAYS=30
 
 _ORPHAN_TOTAL=0
+_ORPHAN_NOW=""
 
 declare -a ORPHAN_CANDIDATES=()
 
@@ -12,6 +13,7 @@ orphans::clean() {
 
   _ORPHAN_TOTAL=0
   ORPHAN_CANDIDATES=()
+  _ORPHAN_NOW=$(date +%s)
 
   local freed_before=$TOTAL_FREED
   local dryrun_before=$TOTAL_DRYRUN_BYTES
@@ -49,8 +51,6 @@ orphans::clean() {
     projected="$freed"
   fi
 
-  module_summary "Orphans" "$_ORPHAN_TOTAL"
-
   local status="clean"
   projected=0
   if [[ "$CLEAN_ORPHANS" == "true" ]]; then
@@ -66,6 +66,10 @@ orphans::clean() {
     status="review"
   fi
 
+  # Reported after the opt-in decision: without --clean-orphans the reclaimable
+  # figure is 0 and the line must say what was found rather than what it frees.
+  module_summary "Orphans" "$_ORPHAN_TOTAL" "$projected"
+
   utils::register_module "Orphans" "System" "$_ORPHAN_TOTAL" "$freed" "$status" "$projected"
 }
 
@@ -80,9 +84,37 @@ orphans::_normalize_name() {
   name="${name#org.}"
   name="${name#net.}"
   name="${name#io.}"
-  local normalized
-  normalized=$(printf '%s' "$name" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]')
-  printf '%s\n' "$normalized"
+  # Strip non-alphanumerics in pure bash; only the case fold needs a process.
+  # bash 3.2 has neither ${x,,} nor `declare -l`, so `tr` stays for lowercasing
+  # alone — one fork instead of the two `tr` calls this used to make.
+  name="${name//[^[:alnum:]]/}"
+  printf '%s\n' "$name" | tr '[:upper:]' '[:lower:]'
+}
+
+# The installed-names file is loaded once and matched in bash. The old code
+# forked `grep` for every candidate and every ancestor prefix (~380 spawns per
+# run, ~1.5 ms each).
+_ORPHAN_INSTALLED_FILE=""
+_ORPHAN_INSTALLED_DATA=""
+
+orphans::_load_installed() {
+  local file="$1"
+  [[ "$file" == "$_ORPHAN_INSTALLED_FILE" ]] && return 0
+  _ORPHAN_INSTALLED_FILE="$file"
+  _ORPHAN_INSTALLED_DATA=""
+  # `$(< file)` is a builtin read — no fork.
+  [[ -f "$file" ]] && _ORPHAN_INSTALLED_DATA="$(< "$file")"
+  return 0
+}
+
+# Exact whole-line membership, replacing `grep -Fxq`.
+orphans::_installed_has_exact() {
+  [[ $'\n'"$_ORPHAN_INSTALLED_DATA"$'\n' == *$'\n'"$1"$'\n'* ]]
+}
+
+# Fixed-substring membership, replacing `grep -qF`.
+orphans::_installed_has_substr() {
+  [[ -n "$1" && "$_ORPHAN_INSTALLED_DATA" == *"$1"* ]]
 }
 
 orphans::_collect_installed_names() {
@@ -115,7 +147,8 @@ orphans::_collect_installed_names() {
     while IFS= read -r app_bundle; do
       [[ -d "$app_bundle" ]] || continue
       local app_name
-      app_name=$(basename "$app_bundle" .app)
+      app_name="$(utils::basename "$app_bundle")"
+      app_name="${app_name%.app}"
       orphans::_normalize_name "$app_name" >> "$outfile"
 
       local plist="$app_bundle/Contents/Info.plist"
@@ -128,15 +161,19 @@ orphans::_collect_installed_names() {
   done
 
   sort -u "$outfile" -o "$outfile"
-  mkdir -p "$(dirname "$cache_file")"
+  mkdir -p "$(utils::dirname "$cache_file")"
   cat "$outfile" > "$cache_file"
 }
 
+# `now` is captured once per run (see _ORPHAN_NOW) so the per-candidate age
+# check does not fork `date` for every path.
 orphans::_is_recent() {
   local path="$1"
   local mtime
   mtime=$(stat -f%m "$path" 2>/dev/null || echo 0)
-  local age_days=$(( ( $(date +%s) - mtime ) / 86400 ))
+  local now="$_ORPHAN_NOW"
+  [[ "$now" =~ ^[0-9]+$ ]] || now=$(date +%s)
+  local age_days=$(( ( now - mtime ) / 86400 ))
   (( age_days < ORPHAN_AGE_DAYS ))
 }
 
@@ -152,12 +189,13 @@ orphans::_is_recent() {
 orphans::_looks_installed() {
   local name="$1"
   local installed_file="$2"
+  orphans::_load_installed "$installed_file"
 
   local normalized
   normalized=$(orphans::_normalize_name "$name")
   [[ -z "$normalized" ]] && return 0
 
-  if grep -Fxq "$normalized" "$installed_file"; then
+  if orphans::_installed_has_exact "$normalized"; then
     return 0
   fi
 
@@ -170,13 +208,13 @@ orphans::_looks_installed() {
     local ancestor
     ancestor=$(orphans::_normalize_name "$candidate")
     [[ -n "$ancestor" ]] || continue
-    if grep -Fxq "$ancestor" "$installed_file"; then
+    if orphans::_installed_has_exact "$ancestor"; then
       return 0
     fi
   done
 
   # Finally allow a substring match so "Slack" matches "slackmacgap".
-  if [[ ${#normalized} -ge 5 ]] && grep -qF "$normalized" "$installed_file" 2>/dev/null; then
+  if [[ ${#normalized} -ge 5 ]] && orphans::_installed_has_substr "$normalized"; then
     return 0
   fi
 
@@ -218,7 +256,7 @@ orphans::_inner_owners() {
   # Two levels reaches vendor/product layouts like firestore/Arc/bcny-arc-server.
   while IFS= read -r entry; do
     [[ -n "$entry" ]] || continue
-    basename "$entry"
+    utils::basename "$entry"
   done < <(find "$dir" -mindepth 1 -maxdepth 2 -type d 2>/dev/null | head -40)
 }
 
@@ -230,6 +268,7 @@ orphans::_inner_owners() {
 orphans::_vendor_is_installed() {
   local name="$1"
   local installed_file="$2"
+  orphans::_load_installed "$installed_file"
 
   # Needs vendor + product to be meaningful; "com" alone is not.
   [[ "$name" == *.*.* ]] || return 1
@@ -238,7 +277,7 @@ orphans::_vendor_is_installed() {
   while [[ "$vendor" == *.* ]]; do
     local normalized
     normalized=$(orphans::_normalize_name "$vendor")
-    if [[ ${#normalized} -ge 5 ]] && grep -qF "$normalized" "$installed_file" 2>/dev/null; then
+    if [[ ${#normalized} -ge 5 ]] && orphans::_installed_has_substr "$normalized"; then
       return 0
     fi
     vendor="${vendor%.*}"
@@ -254,6 +293,7 @@ orphans::_vendor_is_installed() {
 orphans::_looks_like_app_data() {
   local name="$1"
   local installed_file="$2"
+  orphans::_load_installed "$installed_file"
 
   # A reverse-DNS identifier, e.g. com.openai.chat
   [[ "$name" == *.*.* ]] && return 0
@@ -261,7 +301,7 @@ orphans::_looks_like_app_data() {
   # Or a name matching something that was installed at some point.
   local normalized
   normalized=$(orphans::_normalize_name "$name")
-  if [[ ${#normalized} -ge 4 ]] && grep -qF "$normalized" "$installed_file" 2>/dev/null; then
+  if [[ ${#normalized} -ge 4 ]] && orphans::_installed_has_substr "$normalized"; then
     return 0
   fi
 
@@ -323,7 +363,7 @@ orphans::_scan_application_support() {
 
   while IFS= read -r dir; do
     local name
-    name=$(basename "$dir")
+    name=$(utils::basename "$dir")
 
     case "$name" in
       Apple|com.apple.*|MobileSync|Caches|Xcode|JetBrains|SyncServices|CallHistoryDB)
@@ -354,7 +394,7 @@ orphans::_scan_containers() {
 
   while IFS= read -r dir; do
     local name
-    name=$(basename "$dir")
+    name=$(utils::basename "$dir")
     case "$name" in
       com.apple.* | group.com.apple.* | *.com.apple.*) continue ;;
     esac
@@ -383,7 +423,8 @@ orphans::_scan_preferences() {
 
   while IFS= read -r plist; do
     local name
-    name=$(basename "$plist" .plist)
+    name="$(utils::basename "$plist")"
+    name="${name%.plist}"
 
     if protect::is_system_pref_domain "$name"; then
       log::verbose "  Skipping system preference domain: ${name}"
@@ -414,7 +455,7 @@ orphans::_broken_plists() {
     [[ -n "$plist" ]] || continue
     if ! plutil -lint "$plist" >/dev/null 2>&1; then
       # Only report — never auto-delete preference files
-      log::warn "  Corrupt plist: $(basename "$plist")"
+      log::warn "  Corrupt plist: $(utils::basename "$plist")"
       (( count++ )) || true
     fi
   done < <(find "$HOME/Library/Preferences" -maxdepth 1 -name "*.plist" -type f \

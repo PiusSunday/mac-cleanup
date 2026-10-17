@@ -4,7 +4,6 @@ set -euo pipefail
 
 REPO="https://github.com/PiusSunday/mac-cleanup"
 INSTALL_DIR="$HOME/.mac-cleanup"
-BIN_DIR="/usr/local/bin"
 
 echo "Installing mac-cleanup..."
 
@@ -32,17 +31,27 @@ fi
 # Make executable
 chmod +x "${INSTALL_DIR}/bin/mac-cleanup"
 
-# Symlink — fall back to ~/.local/bin if /usr/local/bin is not writable
-if [[ -w "$BIN_DIR" ]]; then
-  ln -sf "${INSTALL_DIR}/bin/mac-cleanup" "${BIN_DIR}/mac-cleanup"
-  echo "✔ Symlinked to ${BIN_DIR}/mac-cleanup"
+# Pick the symlink directory. Homebrew installs to /opt/homebrew/bin on Apple
+# Silicon and /usr/local/bin on Intel; those are the natural bins to prefer.
+# Fall back to ~/.local/bin when neither is writable.
+if [[ -d "/opt/homebrew/bin" && -w "/opt/homebrew/bin" ]]; then
+  BIN_DIR="/opt/homebrew/bin"
+elif [[ -d "/usr/local/bin" && -w "/usr/local/bin" ]]; then
+  BIN_DIR="/usr/local/bin"
 else
-  LOCAL_BIN="$HOME/.local/bin"
-  mkdir -p "$LOCAL_BIN"
-  ln -sf "${INSTALL_DIR}/bin/mac-cleanup" "${LOCAL_BIN}/mac-cleanup"
-  echo "✔ Symlinked to ${LOCAL_BIN}/mac-cleanup"
-  echo "  Add ${LOCAL_BIN} to your PATH if it is not already there."
+  BIN_DIR="$HOME/.local/bin"
+  mkdir -p "$BIN_DIR"
 fi
+
+ln -sf "${INSTALL_DIR}/bin/mac-cleanup" "${BIN_DIR}/mac-cleanup"
+echo "✔ Symlinked to ${BIN_DIR}/mac-cleanup"
+
+# Warn only when the chosen bin is off PATH, which is the case that actually
+# needs the user to act.
+case ":$PATH:" in
+  *":${BIN_DIR}:"*) ;;
+  *) echo "  Add ${BIN_DIR} to your PATH to run 'mac-cleanup' directly." ;;
+esac
 
 # Read the version back from the installed tree. The path moved to
 # lib/core/core.sh in the v0.4.0 refactor and this line was never updated, so

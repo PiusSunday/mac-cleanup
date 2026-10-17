@@ -46,7 +46,7 @@ caches::clean() {
     projected="$freed"
   fi
 
-  module_summary "Caches" "$module_scanned"
+  module_summary "Caches" "$module_scanned" "$projected"
 
   local status="clean"
   if (( module_scanned > 0 )); then
@@ -205,34 +205,79 @@ caches::_cache_owner_process() {
   return 1
 }
 
+# Process and launchd snapshots, taken once per run. The old per-app check
+# forked `pgrep` up to three times plus a `launchctl list | awk | grep` pipeline
+# for every candidate — hundreds of spawns for one sweep.
+_CACHES_SNAPSHOT_READY=false
+_CACHES_PROC_SNAPSHOT=""
+_CACHES_LAUNCHD_LABELS=""
+
+caches::_snapshot_processes_once() {
+  [[ "$_CACHES_SNAPSHOT_READY" == "true" ]] && return 0
+  _CACHES_SNAPSHOT_READY=true
+
+  # Executable basenames, lowercased — mirrors `pgrep -xi`.
+  _CACHES_PROC_SNAPSHOT="$(ps -Ao comm= 2>/dev/null | sed 's#.*/##' | tr '[:upper:]' '[:lower:]')"
+
+  # Launchd labels are the third column of `launchctl list`.
+  if command -v launchctl >/dev/null 2>&1; then
+    _CACHES_LAUNCHD_LABELS="$(launchctl list 2>/dev/null | awk '{print $3}')"
+  fi
+  return 0
+}
+
+# Case-insensitive exact process-name match (mirrors `pgrep -xi`). nocasematch
+# is toggled with bash builtins so there is no `tr` fork per candidate app.
+caches::_process_running() {
+  local needle="$1"
+  [[ -n "$needle" ]] || return 1
+
+  local restore=false
+  shopt -q nocasematch || restore=true
+  shopt -s nocasematch
+
+  local line
+  while IFS= read -r line; do
+    if [[ "$line" == "$needle" ]]; then
+      [[ "$restore" == "true" ]] && shopt -u nocasematch
+      return 0
+    fi
+  done <<< "$_CACHES_PROC_SNAPSHOT"
+
+  [[ "$restore" == "true" ]] && shopt -u nocasematch
+  return 1
+}
+
+# Exact launchd-label match (mirrors `grep -qxF`).
+caches::_launchd_has() {
+  [[ -n "$1" ]] || return 1
+  [[ $'\n'"$_CACHES_LAUNCHD_LABELS"$'\n' == *$'\n'"$1"$'\n'* ]]
+}
+
 caches::_is_app_running() {
   local app_name="$1"
   [[ -n "$app_name" ]] || return 1
+  caches::_snapshot_processes_once
 
   # Known owners first — the directory name rarely matches the process name.
   local owner
   if owner=$(caches::_cache_owner_process "$app_name"); then
-    pgrep -xi "$owner" &>/dev/null && return 0
+    caches::_process_running "$owner" && return 0
   fi
 
-  if pgrep -xi "$app_name" &>/dev/null; then
-    return 0
-  fi
+  caches::_process_running "$app_name" && return 0
 
   # Bundle-id form: try the last dot-separated component.
   if [[ "$app_name" == *.* ]]; then
     local leaf="${app_name##*.}"
-    if [[ -n "$leaf" && ${#leaf} -ge 4 ]] && pgrep -xi "$leaf" &>/dev/null; then
+    if [[ -n "$leaf" && ${#leaf} -ge 4 ]] && caches::_process_running "$leaf"; then
       return 0
     fi
   fi
 
   # A registered launchd label is an exact match, not a substring.
-  if command -v launchctl &>/dev/null; then
-    if launchctl list 2>/dev/null | awk '{print $3}' | grep -qxF "$app_name"; then
-      return 0
-    fi
-  fi
+  caches::_launchd_has "$app_name" && return 0
+
   return 1
 }
 
@@ -297,7 +342,7 @@ caches::_shell_caches() {
     local size
     size=$(utils::get_size_bytes "$zcomp")
     total=$(( total + size ))
-    safe_rm "$zcomp" "zsh completion cache"
+    safe_rm "$zcomp" "zsh completion cache: $(utils::basename "$zcomp")" "" "$size"
   done < <(find "$HOME" -maxdepth 1 -name ".zcompdump*" -type f 2>/dev/null || true)
 
   # Oh My Zsh cache — delete contents, not the directory itself
@@ -387,14 +432,14 @@ caches::_podcasts() {
     local size
     size=$(utils::get_size_bytes "$streamed_media")
     total=$(( total + size ))
-    safe_rm "$streamed_media" "Podcasts streamed media"
+    safe_rm "$streamed_media" "Podcasts streamed media" "" "$size"
   fi
 
   while IFS= read -r f; do
     local size
     size=$(utils::get_size_bytes "$f")
     total=$(( total + size ))
-    safe_rm "$f" "Podcasts tmp"
+    safe_rm "$f" "Podcasts tmp" "" "$size"
   done < <(find "$container" -maxdepth 1 -type f \
     \( -name "*.heic" -o -name "*.img" -o -name "*CFNetworkDownload*.tmp" \) 2>/dev/null || true)
 

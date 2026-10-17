@@ -211,13 +211,17 @@ setup() {
 # sweep — and because system::clean ran above the target gating, even
 # `mac-cleanup --docker` did it.
 
-# Report 125 items totalling 2 GB without touching the real Finder.
+# Report 125 items totalling 2 GB without touching the real Finder. A successful
+# `empty trash` flips the count to 0 the way the real Finder does, so
+# _trash_empty's verification passes and never falls through to its direct-delete
+# path (which would target the real ~/.Trash).
 _stub_full_trash() {
+  _TRASH_REMAINING=125
   _osascript_timed() {
     case "$*" in
-      *"count items in trash"*) echo 125 ;;
+      *"count items in trash"*) echo "$_TRASH_REMAINING" ;;
       *"get size of trash"*)    echo 2147483648 ;;
-      *"empty trash"*)          _TRASH_EMPTIED=true ;;
+      *"empty trash"*)          _TRASH_REMAINING=0; _TRASH_EMPTIED=true ;;
     esac
     return 0
   }

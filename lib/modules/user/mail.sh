@@ -24,7 +24,7 @@ mail::clean() {
     projected="$freed"
   fi
 
-  module_summary "Mail" "$_MAIL_TOTAL"
+  module_summary "Mail" "$_MAIL_TOTAL" "$projected"
 
   local status="clean"
   if (( _MAIL_TOTAL > 0 )); then
@@ -64,7 +64,7 @@ mail::_recent_items() {
     local size
     size=$(utils::get_size_bytes "$f")
     _MAIL_TOTAL=$(( _MAIL_TOTAL + size ))
-    safe_rm "$f" "Recent items list"
+    safe_rm "$f" "Recent items list" "" "$size"
   done < <(find "$shared" -maxdepth 1 -type f -name "com.apple.LSSharedFileList.Recent*" 2>/dev/null || true)
 
   local pref_file="$HOME/Library/Preferences/com.apple.recentitems.plist"
@@ -72,6 +72,6 @@ mail::_recent_items() {
     local size
     size=$(utils::get_size_bytes "$pref_file")
     _MAIL_TOTAL=$(( _MAIL_TOTAL + size ))
-    safe_rm "$pref_file" "Recent items preferences"
+    safe_rm "$pref_file" "Recent items preferences" "" "$size"
   fi
 }

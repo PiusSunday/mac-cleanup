@@ -178,6 +178,21 @@ After the release, confirm the published tarball's SHA-256 matches the formula a
 commit landed — the workflow reports success for the release job even though the tap update is a
 separate job.
 
+If the tap job did not run (a missing or expired `TAP_GITHUB_TOKEN`, or a failed run), the tap
+silently keeps serving the previous version. Update it by hand rather than re-tagging:
+
+```bash
+# In a checkout of PiusSunday/homebrew-mac-cleanup
+TAG=v0.6.0
+SHA=$(curl -sL "https://github.com/PiusSunday/mac-cleanup/archive/refs/tags/${TAG}.tar.gz" \
+  | shasum -a 256 | awk '{print $1}')
+# The tap formula is a copy of mac-cleanup/Formula/mac-cleanup.rb with url/sha256 pinned.
+cp ../mac-cleanup/Formula/mac-cleanup.rb Formula/mac-cleanup.rb
+sed -i '' "s|url \".*\"|url \"https://github.com/PiusSunday/mac-cleanup/archive/refs/tags/${TAG}.tar.gz\"|" Formula/mac-cleanup.rb
+sed -i '' "s/sha256 \".*\"/sha256 \"${SHA}\"/" Formula/mac-cleanup.rb
+git commit -am "Bump mac-cleanup to ${TAG}" && git push
+```
+
 ### Required Secrets
 
 The release workflow requires the following repository secret in GitHub Settings:

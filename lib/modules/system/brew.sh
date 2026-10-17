@@ -46,7 +46,7 @@ brew::clean() {
     projected="$freed"
   fi
 
-  module_summary "Homebrew" "$brew_cache_size"
+  module_summary "Homebrew" "$brew_cache_size" "$projected"
 
   local status="clean"
   if (( brew_cache_size > 0 )); then

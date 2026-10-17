@@ -37,7 +37,7 @@ devops_reset::run() {
   # dry run announce "Nothing to clean" and register as Clean while queueing
   # gigabytes. Report on what this run actually accounted for — the same basis
   # every other module uses.
-  module_summary "DevOps Reset" "$projected"
+  module_summary "DevOps Reset" "$projected" "$projected"
 
   local status="clean"
   if (( projected > 0 )); then

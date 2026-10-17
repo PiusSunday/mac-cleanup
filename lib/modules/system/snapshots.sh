@@ -25,7 +25,7 @@ snapshots::clean() {
   if [[ -z "$snapshots" ]]; then
     log::info "No local snapshots found."
     snapshots::_in_progress
-    module_summary "Snapshots" "0"
+    module_summary "Snapshots" 0 0
     utils::register_module "Snapshots" "Storage Management" "0" "0" "clean"
     return 0
   fi
@@ -54,7 +54,7 @@ snapshots::clean() {
   if (( count > 0 )); then
     log::success "  Snapshots → ${count} local snapshot(s)"
   else
-    module_summary "Snapshots" "$projected"
+    module_summary "Snapshots" "$projected" "$projected"
   fi
 
   local status="clean"
@@ -96,9 +96,14 @@ snapshots::_in_progress() {
       local age_days
       age_days=$(( ( $(date +%s) - $(stat -f%m "$ip" 2>/dev/null || echo 0) ) / 86400 ))
       if (( age_days > 1 )); then
-        local size
-        size=$(utils::get_size_bytes "$ip")
-        safe_rm "$ip" "Stale Time Machine inProgress backup" "sudo"
+        # A backup folder on an external volume needs root. Only use sudo when
+        # it is already available without a prompt, so an unattended run never
+        # blocks on a password — the same rule deep.sh applies.
+        if sudo -n true 2>/dev/null; then
+          safe_rm "$ip" "Stale Time Machine inProgress backup" "sudo"
+        else
+          log::warn "Stale Time Machine inProgress backup needs admin rights: $(utils::basename "$ip")"
+        fi
       fi
     done <<< "$in_progress"
   done

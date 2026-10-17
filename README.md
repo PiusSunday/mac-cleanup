@@ -51,6 +51,22 @@ Simulator runtimes are no longer only reported: `--simulators` removes the ones 
 
 ---
 
+## Upgrading from v0.5.x
+
+v0.6.0 changes a few behaviours that scripts may depend on:
+
+| Before | Now |
+| --- | --- |
+| `--empty-trash` trusted Finder's exit code | Emptiness is verified with a re-query; leftovers are deleted directly |
+| A Trash that could not be read was counted as empty | Reported as unknown, never as `0` |
+| `install.sh` always symlinked to `/usr/local/bin` | `/opt/homebrew/bin` on Apple Silicon, `/usr/local/bin` on Intel |
+| `.DS_Store` scanned `~/Library` and dot-directories | Only locations Finder actually displays — nothing visible is skipped |
+
+The `.DS_Store` scope change is why its figure can look smaller than before, and a full run is much
+faster: the same `--all --dry-run` dropped from about 160 s to about 27 s.
+
+---
+
 ## Upgrading from v0.4.x
 
 v0.5.0 changes behaviour that scripts may depend on:
@@ -159,7 +175,7 @@ mac-cleanup --version
 ### Expected output
 
 ```text
-🧹 mac-cleanup v0.5.0
+🧹 mac-cleanup v0.6.0
 ⚠  DRY-RUN mode — no files will be deleted
 
   Apple Silicon  |  macOS 26.5  |  Free: 203.4 GB  |  User mode
@@ -183,7 +199,7 @@ mac-cleanup --version
 ⚠   3 superseded runtime(s) found — not removed without --simulators.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  🧹 mac-cleanup v0.5.0  ·  dry run  ·  1m 36s
+  🧹 mac-cleanup v0.6.0  ·  dry run  ·  27s
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   MODULE                  RECLAIMABLE   ITEMS

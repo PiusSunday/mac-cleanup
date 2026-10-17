@@ -393,8 +393,16 @@ print_report() {
     printf '  %sUnavailable%s     %s\n' "${DIM}" "${RESET}" "$(report::_join "${skipped_modules[@]}")"
   fi
   if (( TOTAL_PROTECTED > 0 )) || (( TOTAL_DEDUPED > 0 )); then
-    local skip_note="${TOTAL_PROTECTED} paths protected by policy"
-    (( TOTAL_DEDUPED > 0 )) && skip_note="${skip_note}, ${TOTAL_DEDUPED} counted by another module"
+    # Build the note from the parts that are non-zero: "0 paths protected by
+    # policy" next to real dedupes was noise.
+    local skip_note=""
+    if (( TOTAL_PROTECTED > 0 )); then
+      skip_note="${TOTAL_PROTECTED} paths protected by policy"
+    fi
+    if (( TOTAL_DEDUPED > 0 )); then
+      [[ -n "$skip_note" ]] && skip_note="${skip_note}, "
+      skip_note="${skip_note}${TOTAL_DEDUPED} counted by another module"
+    fi
     if [[ "$VERBOSE" != "true" ]]; then
       skip_note="${skip_note}  ${DIM}(--verbose to list)${RESET}"
     fi
