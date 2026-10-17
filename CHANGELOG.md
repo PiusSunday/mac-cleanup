@@ -7,6 +7,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.7.0] - 2026-10-17
+
+The system-store release. Apple's Content Caching store — the copy of software updates and iCloud
+content this Mac caches so other devices on the network do not fetch them again — lives in
+`/Library`, so every previous version walked straight past it.
+
+### Added
+
+- **`--content-cache` flushes Apple's Content Caching store.** The store is system-owned, may be
+  serving other machines and needs admin rights, so it is not reachable from `--system` or `--all`.
+  Those measure it and report the figure, and a run without the flag lists the store under "needs
+  your decision" with the command that flushes it.
+- `--system` and `--all` now probe the store, so a Mac that caches for a whole network can see what
+  the service holds without digging through `/Library`.
+- A flush is credited by re-measuring the store, not by trusting the exit code, so a store macOS
+  refills immediately reports `0` reclaimed. Admin rights are requested the way the deep sweep
+  requests them, and a refused prompt leaves the store alone and hands the command to the decision
+  block instead of reporting a flush that never happened.
+
+### Changed
+
+- The Homebrew formula pins the tarball attached to each GitHub Release instead of a generated
+  archive. A generated archive embeds the commit id, so its checksum changed whenever history was
+  rewritten and silently broke `brew install`; a release asset does not change under a pinned URL.
+
+### Development
+
+- The release workflow now builds its own tarball (`git archive | gzip -n`), verifies it carries
+  `bin/mac-cleanup` and `lib/core/core.sh`, and attaches it as a release asset before updating the
+  tap — with `overwrite_files: false` so a re-run cannot replace already-pinned bytes.
+- Checksums for v0.2.1 through v0.5.0 in their release notes were stale and are corrected.
+
 ## [v0.6.0] - 2026-10-17
 
 The correctness-and-speed release. Emptying the Trash is now verified rather than assumed, and a

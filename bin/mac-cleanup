@@ -27,6 +27,8 @@ source "${LIB_DIR}/modules/system/orphans.sh"
 source "${LIB_DIR}/modules/system/brew.sh"
 # shellcheck source=../lib/modules/system/snapshots.sh
 source "${LIB_DIR}/modules/system/snapshots.sh"
+# shellcheck source=../lib/modules/system/assetcache.sh
+source "${LIB_DIR}/modules/system/assetcache.sh"
 
 # shellcheck source=../lib/modules/user/standard.sh
 source "${LIB_DIR}/modules/user/standard.sh"
@@ -69,6 +71,8 @@ ${BOLD}TARGETS:${RESET}
   --purge-stale      Delete build artifacts in projects untouched for 90+ days
   --empty-trash      Empty the Trash. User data: --yes alone never reaches it.
                      Prompts unless --yes is also passed.
+  --content-cache    Flush Apple's Content Caching store (needs admin rights).
+                     Reports the size first; only flushes when passed.
   --caches, -c       Clear ~/Library/Caches, Zsh, Spotify, JetBrains, and app caches
   --mail, -m         Clean old Mail downloads and recent-item metadata
   --brew, -b         Run brew cleanup and autoremove
@@ -97,6 +101,7 @@ ${BOLD}EXAMPLES:${RESET}
   mac-cleanup --devops-reset --yes  Nuclear cleanup of dev toolchain caches
   mac-cleanup --show-log            Show deletion operation log
   mac-cleanup --simulators          Reclaim unusable Xcode simulator runtimes
+  mac-cleanup --content-cache --yes Flush Apple's Content Caching store (sudo)
   mac-cleanup --purge-stale         Remove build artifacts from dormant projects
   mac-cleanup --version             Show the current version
 
@@ -134,6 +139,7 @@ has_cleanup_target() {
     || [[ "$TARGET_BREW" == "true" ]] \
     || [[ "$TARGET_MAIL" == "true" ]] \
     || [[ "$TARGET_SYSTEM_DEEP" == "true" ]] \
+    || [[ "$TARGET_CONTENT_CACHE" == "true" ]] \
     || [[ "$TARGET_OPTIMIZE" == "true" ]] \
     || [[ "$DEVOPS_RESET_MODE" == "true" ]]
 }
@@ -228,6 +234,10 @@ parse_flags() {
       --empty-trash)
         EMPTY_TRASH=true
         TARGET_SYSTEM=true
+        target_specified=true
+        ;;
+      --content-cache)
+        TARGET_CONTENT_CACHE=true
         target_specified=true
         ;;
       --stale-days)
@@ -597,11 +607,17 @@ main() {
   # These used to run above the gating, so `mac-cleanup --docker` also swept
   # crash reports, .DS_Store, npm caches and emptied the Trash. A target flag
   # now means what it says.
-  if [[ "$TARGET_SYSTEM" == "true" ]] || [[ "$TARGET_SYSTEM_DEEP" == "true" ]]; then
+  if [[ "$TARGET_SYSTEM" == "true" ]] || [[ "$TARGET_SYSTEM_DEEP" == "true" ]] \
+    || [[ "$TARGET_CONTENT_CACHE" == "true" ]]; then
     log::category "System"
     [[ "$TARGET_SYSTEM" == "true" ]] && run_module "System" system::clean
     [[ "$TARGET_SYSTEM_DEEP" == "true" ]] && run_module "System Deep" system_deep::clean
     [[ "$TARGET_SYSTEM" == "true" ]] && run_module "Orphans" orphans::clean
+    # The Content Caching store is measured whenever System runs, so --all tells
+    # the user what it holds; only --content-cache flushes it.
+    if [[ "$TARGET_SYSTEM" == "true" ]] || [[ "$TARGET_CONTENT_CACHE" == "true" ]]; then
+      run_module "Content Caching" assetcache::clean
+    fi
   fi
 
   # ── Developer Tools ──
