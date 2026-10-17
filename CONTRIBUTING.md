@@ -164,7 +164,11 @@ mac-cleanup uses an automated GitHub Actions workflow for releases. To publish a
    git checkout develop && git merge --ff-only main && git push origin develop
    ```
 
-Pushing the tag triggers the Release workflow, which runs validations, creates a GitHub Release with the tarball SHA-256, and updates the Homebrew tap.
+Pushing the tag triggers the Release workflow, which runs validations, builds the release tarball,
+attaches it to the GitHub Release as an immutable asset, and updates the Homebrew tap to pin that
+asset's SHA-256. Pinning the attached asset rather than GitHub's generated archive matters: the
+generated archive embeds the commit id in its pax header, so its bytes change if history is ever
+rewritten and any pinned checksum silently goes stale.
 
 If validation fails, no release is published and the tap is untouched — check with
 `gh release view <tag>` before deciding how to recover. When nothing was published, deleting and
@@ -174,9 +178,9 @@ re-pushing the tag on a fixed commit rewrites nothing anyone has seen:
 git push origin :refs/tags/v0.2.1 && git tag -d v0.2.1
 ```
 
-After the release, confirm the published tarball's SHA-256 matches the formula and that the tap
-commit landed — the workflow reports success for the release job even though the tap update is a
-separate job.
+After the release, confirm the attached asset's SHA-256 matches the formula and that the tap commit
+landed — the workflow reports success for the release job even though the tap update is a separate
+job. The asset is immutable and is never replaced on a re-run, so the pinned checksum cannot drift.
 
 If the tap job did not run (a missing or expired `TAP_GITHUB_TOKEN`, or a failed run), the tap
 silently keeps serving the previous version. Update it by hand rather than re-tagging:
@@ -184,11 +188,12 @@ silently keeps serving the previous version. Update it by hand rather than re-ta
 ```bash
 # In a checkout of PiusSunday/homebrew-mac-cleanup
 TAG=v0.6.0
-SHA=$(curl -sL "https://github.com/PiusSunday/mac-cleanup/archive/refs/tags/${TAG}.tar.gz" \
+ASSET=mac-cleanup-${TAG#v}.tar.gz
+SHA=$(curl -sL "https://github.com/PiusSunday/mac-cleanup/releases/download/${TAG}/${ASSET}" \
   | shasum -a 256 | awk '{print $1}')
 # The tap formula is a copy of mac-cleanup/Formula/mac-cleanup.rb with url/sha256 pinned.
 cp ../mac-cleanup/Formula/mac-cleanup.rb Formula/mac-cleanup.rb
-sed -i '' "s|url \".*\"|url \"https://github.com/PiusSunday/mac-cleanup/archive/refs/tags/${TAG}.tar.gz\"|" Formula/mac-cleanup.rb
+sed -i '' "s|url \".*\"|url \"https://github.com/PiusSunday/mac-cleanup/releases/download/${TAG}/${ASSET}\"|" Formula/mac-cleanup.rb
 sed -i '' "s/sha256 \".*\"/sha256 \"${SHA}\"/" Formula/mac-cleanup.rb
 git commit -am "Bump mac-cleanup to ${TAG}" && git push
 ```

@@ -2,8 +2,11 @@ class MacCleanup < Formula
   desc "Modular macOS developer storage cleanup CLI"
   homepage "https://github.com/PiusSunday/mac-cleanup"
   # url and sha256 are rewritten by the release workflow on every v*.*.* tag.
-  url "https://github.com/PiusSunday/mac-cleanup/archive/refs/tags/v0.4.2.tar.gz"
-  sha256 "89797863637a4ad418768179ab121f591bc8a19da9f5dd5c9dc1025927fe9f1e"
+  # They pin the immutable tarball attached to that GitHub release, not GitHub's
+  # generated archive (whose bytes change if history is ever rewritten). The
+  # values below deliberately mirror the latest published release.
+  url "https://github.com/PiusSunday/mac-cleanup/releases/download/v0.6.0/mac-cleanup-0.6.0.tar.gz"
+  sha256 "4dedab753ce08870623332b22553123b6c4a237570f72c7cfeb882316830fc47"
   license "MIT"
   head "https://github.com/PiusSunday/mac-cleanup.git", branch: "main"
 

@@ -38,27 +38,49 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     outputs:
-      sha256: ${{ steps.sha256.outputs.sha256 }}
-      tag: ${{ steps.sha256.outputs.tag }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+      tag: ${{ steps.pack.outputs.tag }}
+      asset: ${{ steps.pack.outputs.asset }}
     steps:
       - uses: actions/checkout@v5
 
-      - name: Compute tarball SHA-256
-        id: sha256
+      - name: Build immutable release tarball
+        id: pack
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
-          URL="https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz"
-          # Wait briefly for GitHub archive cache to stabilize if needed
-          sleep 30
-          SHA=$(curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$URL" | shasum -a 256 | awk '{print $1}')
-          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Tarball SHA-256: $SHA"
+          PREFIX="mac-cleanup-${TAG#v}"
+          ASSET="${PREFIX}.tar.gz"
+
+          # Build the tarball from the tree rather than downloading GitHub's
+          # generated archive. The generated archive stamps the commit id into
+          # its pax header, so its bytes (and sha256) change whenever history is
+          # rewritten, which silently invalidates an already-pinned checksum.
+          # This tarball is uploaded as a release asset below, and release assets
+          # are immutable, so the checksum the tap pins stays valid forever.
+          # gzip -n drops the embedded timestamp so the build is reproducible.
+          git archive --format=tar --prefix="${PREFIX}/" HEAD | gzip -n > "$ASSET"
+
+          # Refuse to publish a tarball the formula could not install.
+          tar -tzf "$ASSET" | grep -qx "${PREFIX}/bin/mac-cleanup"
+          tar -tzf "$ASSET" | grep -qx "${PREFIX}/lib/core/core.sh"
+
+          SHA=$(shasum -a 256 "$ASSET" | awk '{print $1}')
+          {
+            echo "asset=$ASSET"
+            echo "sha256=$SHA"
+            echo "tag=$TAG"
+          } >> "$GITHUB_OUTPUT"
+          echo "Asset:   $ASSET"
+          echo "SHA-256: $SHA"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          files: ${{ steps.pack.outputs.asset }}
+          # Never replace the asset on a re-run: the tap pins these exact bytes.
+          overwrite_files: false
+          fail_on_unmatched_files: true
           body: |
             ## Installation
 
@@ -73,9 +95,14 @@ jobs:
             curl -sL https://raw.githubusercontent.com/PiusSunday/mac-cleanup/main/install.sh | bash
             ```
 
-            ## Tarball SHA-256
+            ## Release tarball
+
+            `${{ steps.pack.outputs.asset }}` is attached to this release. It is
+            immutable, so the SHA-256 below is stable — it is what the Homebrew
+            formula verifies.
+
             ```
-            ${{ steps.sha256.outputs.sha256 }}
+            ${{ steps.pack.outputs.sha256 }}
             ```
 
   update-tap:
@@ -99,12 +126,15 @@ jobs:
         run: |
           TAG="${{ needs.release.outputs.tag }}"
           SHA="${{ needs.release.outputs.sha256 }}"
+          ASSET="${{ needs.release.outputs.asset }}"
+          # Pin the immutable release asset, never GitHub's generated archive.
+          URL="https://github.com/PiusSunday/mac-cleanup/releases/download/${TAG}/${ASSET}"
           FORMULA="tap/Formula/mac-cleanup.rb"
 
           # The repository formula is the source of truth. Copy it wholesale so
-          # that install/test changes propagate to the tap, then pin the tag.
+          # that install/test changes propagate to the tap, then pin the asset.
           cp source/Formula/mac-cleanup.rb "$FORMULA"
-          sed -i "s|url \".*\"|url \"https://github.com/PiusSunday/mac-cleanup/archive/refs/tags/${TAG}.tar.gz\"|" "$FORMULA"
+          sed -i "s|url \".*\"|url \"${URL}\"|" "$FORMULA"
           sed -i "s/sha256 \".*\"/sha256 \"${SHA}\"/" "$FORMULA"
 
           cd tap
