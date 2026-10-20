@@ -385,7 +385,12 @@ devtools::_framework_caches() {
   done
 
   local seen="|"
-  local scan_dir cache_dir canonical project size_bytes label
+  local scan_dir cache_dir canonical project size_bytes
+  local -a records=()
+
+  # Collect first, delete second: the module can then print biggest-first
+  # instead of in directory-walk order, where a monorepo's dozen 12 KB .turbo
+  # dirs were interleaved with the 768 MB cache that actually matters.
   for scan_dir in "${DEVTOOLS_SCAN_DIRS[@]}"; do
     [[ -d "$scan_dir" ]] || continue
 
@@ -402,21 +407,50 @@ devtools::_framework_caches() {
       size_bytes=$(utils::get_size_bytes "$cache_dir")
       (( size_bytes > 0 )) || continue
 
-      label="${cache_dir/#$HOME\//}"
-      safe_rm "$cache_dir" "build cache: ${label}" "" "$size_bytes"
-      (( SAFE_RM_LAST_BYTES > 0 )) || continue
-
-      (( count++ )) || true
-      total=$(( total + SAFE_RM_LAST_BYTES ))
+      records+=("${size_bytes}	${cache_dir}")
     done < <(find "$scan_dir" -maxdepth 7 "${exclude_args[@]}" \
       \( -name node_modules -o -name .git \) -prune -o \
       \( "${path_args[@]}" \) -type d -prune -print 2>/dev/null || true)
   done
 
+  (( ${#records[@]} > 0 )) || { _DEV_FRAMEWORK_TOTAL=0; return 0; }
+
+  local small_count=0
+  local small_bytes=0
+  local rec label
+  while IFS= read -r rec; do
+    [[ -n "$rec" ]] || continue
+    size_bytes="${rec%%	*}"
+    cache_dir="${rec#*	}"
+    label="${cache_dir/#$HOME\//}"
+
+    safe_rm "$cache_dir" "build cache: ${label}" "silent" "$size_bytes"
+    (( SAFE_RM_LAST_BYTES > 0 )) || continue
+
+    # A monorepo leaves a dozen 12 KB .turbo dirs; listing each one buries the
+    # cache that matters. They are still deleted, still named in the operation
+    # log, and listed individually under --verbose.
+    if (( SAFE_RM_LAST_BYTES >= 1048576 )) || [[ "$VERBOSE" == "true" ]]; then
+      log::item "$SAFE_RM_LAST_BYTES" "build cache: ${label}"
+    else
+      (( small_count++ )) || true
+      small_bytes=$(( small_bytes + SAFE_RM_LAST_BYTES ))
+    fi
+
+    (( count++ )) || true
+    total=$(( total + SAFE_RM_LAST_BYTES ))
+  done < <(printf '%s\n' "${records[@]}" | sort -rn)
+
+  # The tail of the list, on one line: the count and the bytes are the point,
+  # not the twelve package names behind them.
+  if (( small_count > 0 )); then
+    log::item "$small_bytes" "${small_count} smaller build caches (< 1 MB each)"
+  fi
+
   _DEV_FRAMEWORK_TOTAL=$total
 
   if (( count > 0 )); then
-    log::info "Framework build caches: ${count} ($(utils::format_bytes "$total"))"
+    log::info "Framework build caches: ${count} directories ($(utils::format_bytes "$total"))"
   fi
 }
 

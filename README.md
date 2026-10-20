@@ -59,6 +59,22 @@ Macs aren't designed to naturally tidy up after developers. Whether you're build
 If a dev server is running, stop it before a live `--devtools` run: removing `.next/dev` while
 `next dev` is watching forces a full rebuild on the next request.
 
+### Output and colour
+
+Module output is grouped by category (`▌ Developer Tools`) and then by module
+(`Developer Artifacts ─────`), with each finding on one line. Sizes are right-aligned and
+larger findings are listed first; caches under 1 MB are rolled into a single line, and `--verbose`
+lists every path. The closing table ranks modules by what they can actually reclaim, with a
+proportional bar.
+
+Colour uses a muted 256-colour palette chosen to read on both light and dark themes. It turns itself
+off when output is piped or redirected, and can be forced off with either of the standard controls:
+
+```bash
+NO_COLOR=1 mac-cleanup --all --dry-run        # the informal standard
+MAC_CLEANUP_COLOR=0 mac-cleanup --all         # mac-cleanup's own switch
+```
+
 ### System Data clues
 
 The `--system` module also surfaces paths that contribute to the "System Data" bar in macOS Storage settings — but **never deletes them**. These include the Rosetta translation cache and legacy iOS firmware files. Each finding includes the path and a suggestion for how to investigate.

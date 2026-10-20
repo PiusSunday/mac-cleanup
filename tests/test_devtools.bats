@@ -151,6 +151,27 @@ teardown() {
   [ "$_DEV_FRAMEWORK_TOTAL" -eq 0 ]
 }
 
+@test "devtools::_framework_caches: largest first, with tiny caches rolled into one line" {
+  local proj="$HOME/Developer/active"
+  mkdir -p "$proj/.next/dev/cache" "$proj/packages/pkg/.turbo"
+  echo '{"name":"active"}' > "$proj/package.json"
+  dd if=/dev/zero of="$proj/.next/dev/cache/blob" bs=1024 count=2048 2>/dev/null
+  dd if=/dev/zero of="$proj/packages/pkg/.turbo/blob" bs=1024 count=4 2>/dev/null
+
+  # Direct call, output to a file: a command substitution would run the module
+  # in a subshell and discard the total it records.
+  local out
+  devtools::_framework_caches > "$TEST_TMP/out.txt" 2>&1
+  out="$(cat "$TEST_TMP/out.txt")"
+
+  # The one cache that matters is named; the 4 KB one is counted, not listed.
+  [[ "$out" == *".next/dev"* ]]
+  [[ "$out" != *"packages/pkg/.turbo"* ]]
+  [[ "$out" == *"1 smaller build caches"* ]]
+  # Both are still counted toward what --devtools can reclaim.
+  [ "$_DEV_FRAMEWORK_TOTAL" -gt 2000000 ]
+}
+
 # ── Package-manager caches ───────────────────────────────────────────────────
 
 @test "devtools::_tool_caches: cleans uv, pip and corepack caches" {

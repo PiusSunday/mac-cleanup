@@ -9,25 +9,43 @@ if [[ -z "${MAC_CLEANUP_PROTECT_LOADED:-}" ]]; then
 fi
 
 # ── ANSI Colors (terminal-aware) ──────────────────────────────────────────────
-# Disable colors when stdout is not a TTY (piped or redirected)
-if [[ -t 1 ]]; then
-  RED=$'\033[0;31m'
-  GREEN=$'\033[0;32m'
-  YELLOW=$'\033[1;33m'
-  BLUE=$'\033[0;34m'
-  CYAN=$'\033[0;36m'
+# A muted 256-colour palette. The classic saturated 31/32/33/34/36 set glows on
+# a dark theme and vibrates on a light one; these are picked to sit at a similar
+# luminance so the same run reads on both. Colour is off for pipes, redirects,
+# dumb terminals, NO_COLOR, and MAC_CLEANUP_COLOR=0 (for a TTY that still wants
+# plain text).
+_mac_cleanup_color_enabled() {
+  [[ -t 1 ]] || return 1
+  [[ -z "${NO_COLOR:-}" ]] || return 1
+  [[ "${TERM:-}" != "dumb" ]] || return 1
+  [[ "${MAC_CLEANUP_COLOR:-auto}" != "0" ]] || return 1
+  return 0
+}
+
+if _mac_cleanup_color_enabled; then
+  RED=$'\033[38;5;203m'      # coral
+  GREEN=$'\033[38;5;114m'    # mint
+  YELLOW=$'\033[38;5;179m'   # amber
+  BLUE=$'\033[38;5;111m'     # periwinkle — the accent
+  CYAN=$'\033[38;5;116m'     # sky
+  MAGENTA=$'\033[38;5;176m'  # orchid
   BOLD=$'\033[1m'
-  DIM=$'\033[2m'
+  DIM=$'\033[38;5;245m'      # metadata
+  FAINT=$'\033[38;5;240m'    # rules and bar tracks
   RESET=$'\033[0m'
+  ACCENT="$BLUE"
 else
   RED=''
   GREEN=''
   YELLOW=''
   BLUE=''
   CYAN=''
+  MAGENTA=''
   BOLD=''
   DIM=''
+  FAINT=''
   RESET=''
+  ACCENT=''
 fi
 
 # ── Symbols ───────────────────────────────────────────────────────────────────
@@ -169,16 +187,18 @@ log::item() {
   local mark="  "
   [[ "$DRY_RUN" != "true" ]] && mark="${GREEN}${CHECK}${RESET} "
 
-  printf '  %s%s%10s%s  %s\n' "$mark" "${CYAN}" "$(utils::format_bytes "$bytes")" "${RESET}" "$label"
+  printf '  %s%s%10s%s  %s\n' "$mark" "${BOLD}" "$(utils::format_bytes "$bytes")" "${RESET}" "$label"
   _log_to_file "ITEM" "$(utils::format_bytes "$bytes") ${label}"
 }
 
 log::section() {
   local title="$1"
-  local width=50
-  local pad
-  pad=$(printf '━%.0s' $(seq 1 $((width - ${#title} - 5))))
-  printf "\n${BOLD}${BLUE}━━━ %s %s${RESET}\n" "$title" "$pad"
+  local width=62
+  local pad=$(( width - ${#title} - 2 ))
+  (( pad < 1 )) && pad=1
+  local rule
+  rule=$(printf '─%.0s' $(seq 1 "$pad"))
+  printf '\n  %s%s%s %s%s%s\n' "${BOLD}${ACCENT}" "$title" "${RESET}" "${FAINT}" "$rule" "${RESET}"
   _log_to_file "MODULE" "$title"
 }
 
@@ -776,10 +796,11 @@ utils::register_action() {
 }
 
 # ── Category header ──────────────────────────────────────────────────────────
-# Top-level grouping header, visually distinct from module log::section.
+# Top-level grouping header, visually distinct from module log::section: a solid
+# block in the secondary accent, no rule, so the two levels never compete.
 log::category() {
   local title="$1"
-  printf '\n%s%s▶ %s%s\n' "${BOLD}" "${CYAN}" "$title" "${RESET}"
+  printf '\n  %s%s▌ %s%s\n' "${BOLD}" "${MAGENTA}" "$title" "${RESET}"
   _log_to_file "CATEGORY" "$title"
 }
 

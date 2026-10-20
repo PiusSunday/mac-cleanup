@@ -44,6 +44,20 @@ warnings — are fixed here too.
 - Bun, tnpm and the new tool-cache paths add `SAFE_RM_LAST_BYTES` rather than their own `du` result,
   so a protected or whitelisted path can no longer inflate a module's scanned total.
 
+### Changed
+
+- **Output is grouped and ranked instead of walked in directory order.** Category headers, module
+  headers and item rows now share one visual hierarchy, findings are listed largest-first, and
+  build caches under 1 MB collapse into a single line (`67 smaller build caches`) rather than
+  burying the one 768 MB entry. `--verbose` still lists every path, and every path is in the
+  operation log.
+- **A muted 256-colour palette** replaces the saturated ANSI set, so the same run reads on light and
+  dark terminals, with the usual controls: `NO_COLOR=1` and `MAC_CLEANUP_COLOR=0` both force
+  plain text. Colour still turns itself off for pipes and redirects. The summary bar gained a dim
+  track, so its column reads as a scale.
+- A `printf` format/argument mismatch in the module header, which printed a stray blank line and a
+  three-space line before every module's first message, is gone.
+
 ## [v0.7.0] - 2026-10-17
 
 The system-store release. Apple's Content Caching store — the copy of software updates and iCloud
