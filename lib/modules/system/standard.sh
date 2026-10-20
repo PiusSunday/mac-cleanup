@@ -320,6 +320,23 @@ system::_trash_empty() {
   return 0
 }
 
+# True when this process can read ~/.Trash. macOS returns EPERM to the owner
+# when the terminal lacks Full Disk Access, even though Finder (which is
+# granted access) can still list and empty the Trash. Every direct read or
+# delete therefore fails while the Finder path works — the two failure modes
+# need different messages, and "check for locked files" is wrong for this one.
+system::_trash_readable() {
+  [[ -d "${HOME}/.Trash" ]] || return 0
+  [[ -r "${HOME}/.Trash" ]]
+}
+
+# The actionable half of a Full Disk Access denial. Without this the user is
+# left with "Trash: 3 items remain — check for locked files", which sends them
+# looking for a lock that does not exist.
+system::_trash_fda_hint() {
+  log::info "  Grant Full Disk Access to your terminal: System Settings → Privacy & Security → Full Disk Access"
+}
+
 system::_trash() {
   _SYS_TRASH_TOTAL=0
 
@@ -331,10 +348,24 @@ system::_trash() {
 
   if [[ -z "$trash_count" ]]; then
     log::info "Trash: item count unavailable — Finder did not answer and ~/.Trash is not readable."
+    if ! system::_trash_readable; then
+      system::_trash_fda_hint
+      utils::register_action \
+        "The Trash cannot be inspected without Full Disk Access" \
+        "0" \
+        "open \"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles\""
+    fi
     return
   fi
 
   if (( trash_count == 0 )); then
+    # Finder is authoritative — a probe that trashes a known file makes it
+    # report 1 — but when ~/.Trash itself is unreadable the two sources cannot
+    # corroborate each other, and that is worth saying in the log if a user
+    # ever asks why the count disagreed with what they saw.
+    if ! system::_trash_readable; then
+      log::verbose "  Trash: Finder reports empty; ~/.Trash is unreadable (no Full Disk Access), so the filesystem count could not confirm it."
+    fi
     log::info "Trash: empty."
     return
   fi
@@ -393,9 +424,21 @@ system::_trash() {
       log::success "Trash emptied (${trash_count} items)"
     fi
   elif [[ -n "$_SYS_TRASH_REMAINING" ]]; then
-    log::warn "Trash: $(system::_item_count_phrase "$_SYS_TRASH_REMAINING") remain after emptying — check for locked files or Finder permissions"
+    if ! system::_trash_readable; then
+      log::warn "Trash: $(system::_item_count_phrase "$_SYS_TRASH_REMAINING") remain — Finder could not delete them and removing them directly needs Full Disk Access."
+      system::_trash_fda_hint
+      utils::register_action \
+        "$(system::_item_count_phrase "$_SYS_TRASH_REMAINING") stuck in the Trash — Full Disk Access required" \
+        "0" \
+        "open \"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles\""
+    else
+      log::warn "Trash: $(system::_item_count_phrase "$_SYS_TRASH_REMAINING") remain after emptying — check for locked files or Finder permissions"
+    fi
   else
     log::warn "Trash: emptying was requested but could not be verified as empty"
+    if ! system::_trash_readable; then
+      system::_trash_fda_hint
+    fi
   fi
 }
 
@@ -518,19 +561,34 @@ system::_var_folders() {
   # all of /private/var/folders — the old sweep walked every user's temp trees
   # (and anything else mounted there) for a path it was already told.
   local -a safe_subdirs=("TemporaryItems" "Cleanup At Startup" "-Tmp-")
+  local skipped=0
   for subdir in "${safe_subdirs[@]}"; do
     while IFS= read -r target; do
       [[ -d "$target" ]] || continue
       safe_rm "$target" "var/folders temp ($subdir)" "silent"
-      (( SAFE_RM_LAST_BYTES > 0 )) || continue
-      log::verbose "  var/folders temp: $(utils::format_bytes "$SAFE_RM_LAST_BYTES") ($subdir)"
-      total=$(( total + SAFE_RM_LAST_BYTES ))
+      if (( SAFE_RM_LAST_BYTES > 0 )); then
+        log::verbose "  var/folders temp: $(utils::format_bytes "$SAFE_RM_LAST_BYTES") ($target)"
+        total=$(( total + SAFE_RM_LAST_BYTES ))
+      elif [[ "$SAFE_RM_FAILED" == "true" ]]; then
+        (( skipped++ )) || true
+      fi
     done < <(find "$user_tmp" -maxdepth 2 -name "$subdir" -type d 2>/dev/null || true)
   done
 
   _SYS_VARFOLDERS_TOTAL=$total
   if (( total > 0 )); then
     log::info "var/folders temp: $(utils::format_bytes "$total")"
+  fi
+  # One line, not one per container. A busy app holds its TemporaryItems open
+  # for the whole session, so the same "in use" result repeats for every
+  # container the scan finds — fifty identical warnings say nothing the count
+  # does not.
+  if (( skipped > 0 )); then
+    if (( total > 0 )); then
+      log::verbose "  var/folders temp: $(system::_item_count_phrase "$skipped") in use — skipped"
+    else
+      log::info "var/folders temp: $(system::_item_count_phrase "$skipped") in use — skipped"
+    fi
   fi
 }
 

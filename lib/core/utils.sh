@@ -9,25 +9,43 @@ if [[ -z "${MAC_CLEANUP_PROTECT_LOADED:-}" ]]; then
 fi
 
 # ── ANSI Colors (terminal-aware) ──────────────────────────────────────────────
-# Disable colors when stdout is not a TTY (piped or redirected)
-if [[ -t 1 ]]; then
-  RED=$'\033[0;31m'
-  GREEN=$'\033[0;32m'
-  YELLOW=$'\033[1;33m'
-  BLUE=$'\033[0;34m'
-  CYAN=$'\033[0;36m'
+# A muted 256-colour palette. The classic saturated 31/32/33/34/36 set glows on
+# a dark theme and vibrates on a light one; these are picked to sit at a similar
+# luminance so the same run reads on both. Colour is off for pipes, redirects,
+# dumb terminals, NO_COLOR, and MAC_CLEANUP_COLOR=0 (for a TTY that still wants
+# plain text).
+_mac_cleanup_color_enabled() {
+  [[ -t 1 ]] || return 1
+  [[ -z "${NO_COLOR:-}" ]] || return 1
+  [[ "${TERM:-}" != "dumb" ]] || return 1
+  [[ "${MAC_CLEANUP_COLOR:-auto}" != "0" ]] || return 1
+  return 0
+}
+
+if _mac_cleanup_color_enabled; then
+  RED=$'\033[38;5;203m'      # coral
+  GREEN=$'\033[38;5;114m'    # mint
+  YELLOW=$'\033[38;5;179m'   # amber
+  BLUE=$'\033[38;5;111m'     # periwinkle — the accent
+  CYAN=$'\033[38;5;116m'     # sky
+  MAGENTA=$'\033[38;5;176m'  # orchid
   BOLD=$'\033[1m'
-  DIM=$'\033[2m'
+  DIM=$'\033[38;5;245m'      # metadata
+  FAINT=$'\033[38;5;240m'    # rules and bar tracks
   RESET=$'\033[0m'
+  ACCENT="$BLUE"
 else
   RED=''
   GREEN=''
   YELLOW=''
   BLUE=''
   CYAN=''
+  MAGENTA=''
   BOLD=''
   DIM=''
+  FAINT=''
   RESET=''
+  ACCENT=''
 fi
 
 # ── Symbols ───────────────────────────────────────────────────────────────────
@@ -169,16 +187,18 @@ log::item() {
   local mark="  "
   [[ "$DRY_RUN" != "true" ]] && mark="${GREEN}${CHECK}${RESET} "
 
-  printf '  %s%s%10s%s  %s\n' "$mark" "${CYAN}" "$(utils::format_bytes "$bytes")" "${RESET}" "$label"
+  printf '  %s%s%10s%s  %s\n' "$mark" "${BOLD}" "$(utils::format_bytes "$bytes")" "${RESET}" "$label"
   _log_to_file "ITEM" "$(utils::format_bytes "$bytes") ${label}"
 }
 
 log::section() {
   local title="$1"
-  local width=50
-  local pad
-  pad=$(printf '━%.0s' $(seq 1 $((width - ${#title} - 5))))
-  printf "\n${BOLD}${BLUE}━━━ %s %s${RESET}\n" "$title" "$pad"
+  local width=62
+  local pad=$(( width - ${#title} - 2 ))
+  (( pad < 1 )) && pad=1
+  local rule
+  rule=$(printf '─%.0s' $(seq 1 "$pad"))
+  printf '\n  %s%s%s %s%s%s\n' "${BOLD}${ACCENT}" "$title" "${RESET}" "${FAINT}" "$rule" "${RESET}"
   _log_to_file "MODULE" "$title"
 }
 
@@ -314,6 +334,10 @@ _safe_rm_check_system_path() {
 # keeps the report's Found column equal to Reclaimable.
 SAFE_RM_LAST_BYTES=0
 
+# true when the most recent safe_rm attempted a delete and it failed. Silent
+# sweeps read this instead of a warning line to aggregate their own summary.
+SAFE_RM_FAILED=false
+
 # Counters surfaced in the summary report.
 TOTAL_PROTECTED=0
 TOTAL_PROTECTED_BYTES=0
@@ -332,6 +356,7 @@ safe_rm() {
   local use_silent=false
 
   SAFE_RM_LAST_BYTES=0
+  SAFE_RM_FAILED=false
 
   if [[ "$options" == *"force"* ]]; then
     use_force=true
@@ -437,12 +462,22 @@ safe_rm() {
     return 0
   fi
 
+  # `silent` suppresses the success row *and* the failure warning. A sweep that
+  # walks dozens of same-named targets (var/folders) aggregates its own skips;
+  # leaving the warning on printed the identical line once per target, which is
+  # how a single run produced fifty copies of "Skipped: var/folders temp".
+  local failed_note=""
+  if [[ "$use_silent" != "true" ]]; then
+    failed_note="${label} (deletion failed/in use)"
+  fi
+
   if [[ "$use_sudo" == "true" ]]; then
     sudo rm -rf -- "$resolved" 2>/dev/null || {
       log::verbose "safe_rm: deletion failed: $resolved"
       _oplog "SKIPPED" "$resolved" "delete-failed"
-      if [[ "$DRY_RUN" != "true" ]]; then
-        log::warn "Skipped: ${label} (deletion failed/in use)"
+      SAFE_RM_FAILED=true
+      if [[ "$DRY_RUN" != "true" && -n "$failed_note" ]]; then
+        log::warn "Skipped: ${failed_note}"
       fi
       return 0
     }
@@ -450,8 +485,9 @@ safe_rm() {
     rm -rf -- "$resolved" 2>/dev/null || {
       log::verbose "safe_rm: deletion failed: $resolved"
       _oplog "SKIPPED" "$resolved" "delete-failed"
-      if [[ "$DRY_RUN" != "true" ]]; then
-        log::warn "Skipped: ${label} (deletion failed/in use)"
+      SAFE_RM_FAILED=true
+      if [[ "$DRY_RUN" != "true" && -n "$failed_note" ]]; then
+        log::warn "Skipped: ${failed_note}"
       fi
       return 0
     }
@@ -760,10 +796,11 @@ utils::register_action() {
 }
 
 # ── Category header ──────────────────────────────────────────────────────────
-# Top-level grouping header, visually distinct from module log::section.
+# Top-level grouping header, visually distinct from module log::section: a solid
+# block in the secondary accent, no rule, so the two levels never compete.
 log::category() {
   local title="$1"
-  printf '\n%s%s▶ %s%s\n' "${BOLD}" "${CYAN}" "$title" "${RESET}"
+  printf '\n  %s%s▌ %s%s\n' "${BOLD}" "${MAGENTA}" "$title" "${RESET}"
   _log_to_file "CATEGORY" "$title"
 }
 

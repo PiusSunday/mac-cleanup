@@ -82,6 +82,9 @@ devtools::clean() {
   devtools::_stale_artifacts
   module_scanned=$(( module_scanned + _DEV_ARTIFACT_TOTAL ))
 
+  devtools::_framework_caches
+  module_scanned=$(( module_scanned + _DEV_FRAMEWORK_TOTAL ))
+
   devtools::_rust_targets
   module_scanned=$(( module_scanned + _DEV_RUST_TOTAL ))
 
@@ -105,6 +108,9 @@ devtools::clean() {
 
   devtools::_bun_tnpm
   module_scanned=$(( module_scanned + _DEV_BUNTNPM_TOTAL ))
+
+  devtools::_tool_caches
+  module_scanned=$(( module_scanned + _DEV_TOOLCACHE_TOTAL ))
 
   devtools::_flutter
   module_scanned=$(( module_scanned + _DEV_FLUTTER_TOTAL ))
@@ -137,6 +143,8 @@ devtools::clean() {
 # ── Internal state ────────────────────────────────────────────────────────────
 
 _DEV_ARTIFACT_TOTAL=0
+_DEV_FRAMEWORK_TOTAL=0
+_DEV_TOOLCACHE_TOTAL=0
 _DEV_RUST_TOTAL=0
 _DEV_CARGO_TOTAL=0
 _DEV_PYTHON_TOTAL=0
@@ -332,6 +340,168 @@ devtools::_stale_artifacts() {
   else
     log::info "Stale artifacts: none — all ${active_count} projects are active."
   fi
+}
+
+# ── a2) Framework build caches ───────────────────────────────────────────────
+# Staleness is the right gate for build *output*: a dist/ in a project you still
+# ship is not garbage. Framework caches are a different class — `.next/dev`,
+# `.next/cache`, `.turbo` and friends exist only to make the next build faster
+# and regrow on demand. Age-gating them means a project under daily work keeps
+# a cache that grows without bound (768 MB in a single project on this Mac)
+# while the report says "all 48 projects are active".
+#
+# Only cache directories are listed here. `.next`, `dist`, `build`,
+# `node_modules` and `target` stay behind --purge-stale.
+FRAMEWORK_CACHE_PATHS=(
+  ".next/dev"
+  ".next/cache"
+  ".turbo"
+  ".vite"
+  ".parcel-cache"
+  ".angular/cache"
+  ".expo/web/cache"
+)
+
+devtools::_framework_caches() {
+  _DEV_FRAMEWORK_TOTAL=0
+  local total=0
+  local count=0
+
+  local exclude_args=()
+  while IFS= read -r -d '' arg; do
+    exclude_args+=("$arg")
+  done < <(devtools::_build_exclude_args DEVTOOLS_EXCLUDE_PATHS)
+
+  local -a path_args=()
+  local first=true
+  local rel
+  for rel in "${FRAMEWORK_CACHE_PATHS[@]}"; do
+    if [[ "$first" == "true" ]]; then
+      path_args+=(-path "*/${rel}")
+      first=false
+    else
+      path_args+=(-o -path "*/${rel}")
+    fi
+  done
+
+  local seen="|"
+  local scan_dir cache_dir canonical project size_bytes
+  local -a records=()
+
+  # Collect first, delete second: the module can then print biggest-first
+  # instead of in directory-walk order, where a monorepo's dozen 12 KB .turbo
+  # dirs were interleaved with the 768 MB cache that actually matters.
+  for scan_dir in "${DEVTOOLS_SCAN_DIRS[@]}"; do
+    [[ -d "$scan_dir" ]] || continue
+
+    while IFS= read -r cache_dir; do
+      [[ -n "$cache_dir" ]] || continue
+
+      canonical="$(cd "$cache_dir" 2>/dev/null && pwd -P)" || continue
+      [[ "$seen" == *"|$canonical|"* ]] && continue
+      seen="${seen}${canonical}|"
+
+      # Only inside a real project — a stray `.vite` in Downloads is not ours.
+      project="$(devtools::_project_root "$(dirname "$cache_dir")")" || continue
+
+      size_bytes=$(utils::get_size_bytes "$cache_dir")
+      (( size_bytes > 0 )) || continue
+
+      records+=("${size_bytes}	${cache_dir}")
+    done < <(find "$scan_dir" -maxdepth 7 "${exclude_args[@]}" \
+      \( -name node_modules -o -name .git \) -prune -o \
+      \( "${path_args[@]}" \) -type d -prune -print 2>/dev/null || true)
+  done
+
+  (( ${#records[@]} > 0 )) || { _DEV_FRAMEWORK_TOTAL=0; return 0; }
+
+  local small_count=0
+  local small_bytes=0
+  local rec label
+  while IFS= read -r rec; do
+    [[ -n "$rec" ]] || continue
+    size_bytes="${rec%%	*}"
+    cache_dir="${rec#*	}"
+    label="${cache_dir/#$HOME\//}"
+
+    safe_rm "$cache_dir" "build cache: ${label}" "silent" "$size_bytes"
+    (( SAFE_RM_LAST_BYTES > 0 )) || continue
+
+    # A monorepo leaves a dozen 12 KB .turbo dirs; listing each one buries the
+    # cache that matters. They are still deleted, still named in the operation
+    # log, and listed individually under --verbose.
+    if (( SAFE_RM_LAST_BYTES >= 1048576 )) || [[ "$VERBOSE" == "true" ]]; then
+      log::item "$SAFE_RM_LAST_BYTES" "build cache: ${label}"
+    else
+      (( small_count++ )) || true
+      small_bytes=$(( small_bytes + SAFE_RM_LAST_BYTES ))
+    fi
+
+    (( count++ )) || true
+    total=$(( total + SAFE_RM_LAST_BYTES ))
+  done < <(printf '%s\n' "${records[@]}" | sort -rn)
+
+  # The tail of the list, on one line: the count and the bytes are the point,
+  # not the twelve package names behind them.
+  if (( small_count > 0 )); then
+    log::item "$small_bytes" "${small_count} smaller build caches (< 1 MB each)"
+  fi
+
+  _DEV_FRAMEWORK_TOTAL=$total
+
+  if (( count > 0 )); then
+    log::info "Framework build caches: ${count} directories ($(utils::format_bytes "$total"))"
+  fi
+}
+
+# ── a3) Package-manager caches ───────────────────────────────────────────────
+# Same class as npm/pnpm: regenerated on demand, no user data inside. Each path
+# is the tool's documented cache location; the owner command is deliberately not
+# used because several of these tools are not installed even when their cache is
+# still on disk (a removed toolchain leaves its cache behind).
+DEVTOOL_CACHE_DIRS=(
+  # uv (Python)
+  "$HOME/.cache/uv"
+  "$HOME/Library/Caches/uv"
+  # pip
+  "$HOME/Library/Caches/pip"
+  "$HOME/.cache/pip"
+  # conda package cache — environments hardlink into it, so removing it does not
+  # touch an environment; it only forces a re-download.
+  "$HOME/miniconda3/pkgs"
+  "$HOME/anaconda3/pkgs"
+  "$HOME/miniforge3/pkgs"
+  "$HOME/mambaforge/pkgs"
+  "$HOME/.conda/pkgs"
+  # mise downloads (installed versions live under installs/, not here)
+  "$HOME/.local/share/mise/downloads"
+  "$HOME/Library/Caches/mise"
+  # corepack (Node)
+  "$HOME/Library/Caches/node/corepack"
+  "$HOME/.cache/node/corepack"
+  # GitHub CLI
+  "$HOME/Library/Caches/gh"
+  "$HOME/.cache/gh"
+  # yarn classic
+  "$HOME/Library/Caches/yarn"
+  "$HOME/.cache/yarn"
+  # deno
+  "$HOME/Library/Caches/deno"
+)
+
+devtools::_tool_caches() {
+  _DEV_TOOLCACHE_TOTAL=0
+  local total=0
+  local p name
+
+  for p in "${DEVTOOL_CACHE_DIRS[@]}"; do
+    [[ -d "$p" ]] || continue
+    name="${p/#$HOME\//}"
+    safe_rm "$p" "tool cache: ${name}"
+    total=$(( total + SAFE_RM_LAST_BYTES ))
+  done
+
+  _DEV_TOOLCACHE_TOTAL=$total
 }
 
 # ── b) Rust target/ directories ──────────────────────────────────────────────
@@ -754,21 +924,19 @@ devtools::_bun_tnpm() {
   _DEV_BUNTNPM_TOTAL=0
   local total=0
 
-  # Bun
-  if command -v bun &>/dev/null; then
-    local -a bun_paths=(
-      "$HOME/Library/Caches/bun"
-      "$HOME/.bun/install/cache"
-    )
-    for p in "${bun_paths[@]}"; do
-      [[ -d "$p" ]] || continue
-      local size
-      size=$(utils::get_size_bytes "$p")
-      (( size > 0 )) || continue
-      total=$(( total + size ))
-      safe_rm "$p" "Bun cache: $(basename "$p")"
-    done
-  fi
+  # Bun — cleaned even when the binary is gone. A toolchain that was removed
+  # (or lives outside PATH, e.g. under a version manager) leaves its cache
+  # behind; gating this on `command -v bun` made those bytes unreachable, which
+  # is how a populated bun cache survived every run. The directory is the signal.
+  local -a bun_paths=(
+    "$HOME/Library/Caches/bun"
+    "$HOME/.bun/install/cache"
+  )
+  for p in "${bun_paths[@]}"; do
+    [[ -d "$p" ]] || continue
+    safe_rm "$p" "Bun cache: ${p/#$HOME\//}"
+    total=$(( total + SAFE_RM_LAST_BYTES ))
+  done
 
   # tnpm
   local -a tnpm_paths=(
@@ -779,11 +947,8 @@ devtools::_bun_tnpm() {
   local p
   for p in "${tnpm_paths[@]}"; do
     [[ -d "$p" ]] || continue
-    local size
-    size=$(utils::get_size_bytes "$p")
-    (( size > 0 )) || continue
-    total=$(( total + size ))
     safe_rm "$p" "JS runtime cache: $(basename "$p")"
+    total=$(( total + SAFE_RM_LAST_BYTES ))
   done
 
   _DEV_BUNTNPM_TOTAL=$total

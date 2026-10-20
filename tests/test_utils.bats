@@ -225,6 +225,26 @@ teardown() {
 
 # ── utils::with_spinner ──────────────────────────────────────────────────────
 
+@test "colors: _mac_cleanup_color_enabled is false without a TTY" {
+  ! _mac_cleanup_color_enabled
+}
+
+@test "log::section: prints one title line and nothing else" {
+  # printf reuses its format when handed more arguments than placeholders. The
+  # header used to emit a blank line and a three-space line after every title.
+  local out
+  out="$(log::section "Header Check")"
+  [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 2 ]
+  [[ "$(printf '%s\n' "$out" | sed -n '2p')" =~ ^\ \ Header\ Check\ ─+$ ]]
+}
+
+@test "log::category: prints exactly one header line" {
+  local out
+  out="$(log::category "Developer Tools")"
+  [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 2 ]
+  [[ "$out" == *"Developer Tools"* ]]
+}
+
 @test "utils::with_spinner: non-TTY fallback runs command and returns success" {
   run utils::with_spinner "Testing echo" echo "hello"
   [ "$status" -eq 0 ]

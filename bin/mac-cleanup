@@ -329,10 +329,10 @@ print_report() {
   local bar
   bar=$(printf '━%.0s' $(seq 1 76))
 
-  printf '\n%s%s%s%s\n' "${BOLD}" "${BLUE}" "$bar" "${RESET}"
+  printf '\n%s%s%s%s\n' "${BOLD}" "${ACCENT}" "$bar" "${RESET}"
   printf '  %s🧹 mac-cleanup v%s%s  %s·  %s  ·  %s%s\n' \
     "${BOLD}" "$VERSION" "${RESET}" "${DIM}" "$mode_label" "$(report::_duration "$duration")" "${RESET}"
-  printf '%s%s%s%s\n\n' "${BOLD}" "${BLUE}" "$bar" "${RESET}"
+  printf '%s%s%s%s\n\n' "${BOLD}" "${ACCENT}" "$bar" "${RESET}"
 
   # Tolerate the array being entirely unset, not merely empty: under `set -u`
   # bash aborts on an unset name, and a caller that sources the libs from inside
@@ -380,16 +380,16 @@ print_report() {
     # A module that cleans through its own tool (brew, docker) queues no paths,
     # so "0" beside a real size reads as a contradiction rather than "unknown".
     (( items == 0 )) && items_fmt="—"
-    printf '  %-22s %12s %7s  %s\n' \
-      "$name" "$(utils::format_bytes "$projected")" "$items_fmt" \
+    printf '  %-22s %s%12s%s %7s  %s\n' \
+      "$name" "${BOLD}" "$(utils::format_bytes "$projected")" "${RESET}" "$items_fmt" \
       "$(report::_bar "$projected" "$max_bytes")"
   done <<< "$ranked"
 
   local rule
   rule=$(printf '─%.0s' $(seq 1 74))
-  printf '  %s\n' "$rule"
+  printf '  %s%s%s\n' "${FAINT}" "$rule" "${RESET}"
   printf '  %s%-22s %12s %7s%s\n' \
-    "${BOLD}" "Total" "$(utils::format_bytes "$total_bytes")" "$total_items" "${RESET}"
+    "${BOLD}${ACCENT}" "Total" "$(utils::format_bytes "$total_bytes")" "$total_items" "${RESET}"
 
   # ── Modules with nothing to do ──
   printf '\n'
@@ -460,7 +460,7 @@ print_report() {
   else
     printf '  %s%sReclaimed %s.%s\n' "${BOLD}" "${GREEN}" "$(utils::format_bytes "$total_bytes")" "${RESET}"
   fi
-  printf '%s%s%s%s\n\n' "${BOLD}" "${BLUE}" "$bar" "${RESET}"
+  printf '%s%s%s%s\n\n' "${BOLD}" "${ACCENT}" "$bar" "${RESET}"
 }
 
 # Emit "sortkey|name|projected|items" per module with something to reclaim,
@@ -484,20 +484,23 @@ report::_ranked_rows() {
 report::_bar() {
   local bytes="$1"
   local max="$2"
-  local width=26
+  local width=24
 
   (( bytes > 0 && max > 0 )) || return 0
 
   local filled=$(( bytes * width / max ))
-  if (( filled < 1 )); then
-    printf '%s▏%s' "${DIM}" "${RESET}"
-    return 0
-  fi
+  # A non-zero module always shows at least one cell: "small but present" must
+  # never look like "absent".
+  (( filled < 1 )) && filled=1
+  (( filled > width )) && filled=width
 
-  local out=""
-  local n
+  local out="" track="" n
   for (( n=0; n<filled; n++ )); do out="${out}█"; done
-  printf '%s%s%s' "${CYAN}" "$out" "${RESET}"
+  for (( n=filled; n<width; n++ )); do track="${track}░"; done
+
+  # The dim track gives every row the same width, so the column reads as a
+  # scale instead of a ragged left-aligned blob.
+  printf '%s%s%s%s%s' "${ACCENT}" "$out" "${FAINT}" "$track" "${RESET}"
 }
 
 report::_join() {

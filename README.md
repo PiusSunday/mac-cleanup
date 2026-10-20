@@ -34,8 +34,8 @@ Macs aren't designed to naturally tidy up after developers. Whether you're build
 | `--xcode`        | Xcode         | DerivedData, Archives (90d+), iOS DeviceSupport, Simulators, CoreSimulator logs                                                | 10–90 GB        |
 | `--simulators`   | Xcode         | Superseded simulator runtimes (keeps the newest per platform) and unavailable simulator devices                                | 8–40 GB         |
 | `--docker`       | Docker        | Precision cleanup of stopped containers, dangling images, dangling volumes, build cache                                        | 5–30 GB         |
-| `--devtools`     | Dev Artifacts | Rust `target/`, Python `__pycache__`, Flutter, Gradle, Ruby, editor caches; reports stale project artifacts | 5–60 GB         |
-| `--purge-stale`  | Dev Artifacts | `node_modules`, `target`, `build`, `dist`, `.next`, `.dart_tool` in projects untouched 90+ days | 1–50 GB         |
+| `--devtools`     | Dev Artifacts | Rust `target/`, Python `__pycache__`, Flutter, Gradle, Ruby, editor caches, package-manager caches (uv, pip, conda, mise, corepack, GitHub CLI, yarn, deno, Bun), framework build caches (`.next/dev`, `.next/cache`, `.turbo`, `.vite`, `.parcel-cache`, `.angular/cache`); reports stale project artifacts | 5–60 GB |
+| `--purge-stale`  | Dev Artifacts | `node_modules`, `target`, `build`, `dist`, `.next`, `.dart_tool` in projects untouched 90+ days. Framework *caches* are cleaned by `--devtools` regardless of age; only real build output is age-gated | 1–50 GB |
 | `--snapshots`    | Snapshots     | Local Time Machine snapshots & stale `.inProgress` backups                                                                     | 5–20 GB         |
 | `--content-cache`| Content Caching | Apple's Content Caching store — software updates and iCloud content this Mac cached for other devices. Reports unless passed; needs admin rights. | 5–100+ GB |
 | `--caches`       | Caches        | ~/Library/Caches, Application Support caches/logs, Saved App State, Zsh, JetBrains                                             | 2–15 GB         |
@@ -43,6 +43,37 @@ Macs aren't designed to naturally tidy up after developers. Whether you're build
 | `--brew`         | Homebrew      | Cached downloads, outdated versions, unused dependencies                                                                       | 1–5 GB          |
 | `--devops-reset` | DevOps Reset  | Cross-ecosystem deep cleanup for Docker and language toolchains; optional model caches with `--include-ml-models`              | 10–120+ GB      |
 | `--optimize`     | Optimization  | DNS flush (`dscacheutil`), LaunchServices rebuild, SQLite VACUUM for Safari/Messages, Font cache clear                         | N/A             |
+
+### Framework caches vs build output
+
+`--devtools` treats a framework *cache* differently from build *output*:
+
+- **Cleaned regardless of project age**: `.next/dev`, `.next/cache`, `.turbo`, `.vite`,
+  `.parcel-cache`, `.angular/cache`, `.expo/web/cache`. These only exist to make the next build
+  faster and are rebuilt on demand — a project under daily work would otherwise carry a cache that
+  grows without bound.
+- **Age-gated behind `--purge-stale`**: `.next`, `dist`, `build`, `node_modules`, `target`, `.dart_tool`.
+  These are the build itself, so they are only reclaimed when the project has been untouched for
+  `--stale-days` (default 90).
+
+If a dev server is running, stop it before a live `--devtools` run: removing `.next/dev` while
+`next dev` is watching forces a full rebuild on the next request.
+
+### Output and colour
+
+Module output is grouped by category (`▌ Developer Tools`) and then by module
+(`Developer Artifacts ─────`), with each finding on one line. Sizes are right-aligned and
+larger findings are listed first; caches under 1 MB are rolled into a single line, and `--verbose`
+lists every path. The closing table ranks modules by what they can actually reclaim, with a
+proportional bar.
+
+Colour uses a muted 256-colour palette chosen to read on both light and dark themes. It turns itself
+off when output is piped or redirected, and can be forced off with either of the standard controls:
+
+```bash
+NO_COLOR=1 mac-cleanup --all --dry-run        # the informal standard
+MAC_CLEANUP_COLOR=0 mac-cleanup --all         # mac-cleanup's own switch
+```
 
 ### System Data clues
 
@@ -276,7 +307,7 @@ each one individually. Nothing is ever truncated.
 | `--system-deep`       | `-z`  | false   | Deep age-gated system cleanup for diagnostic logs and stale installer artifacts                 |
 | `--xcode`             | `-x`  | false   | Clean Xcode artifacts                                                                           |
 | `--docker`            | `-d`  | false   | Clean Docker resources by explicit IDs/names                                                    |
-| `--devtools`          | `-D`  | false   | Clean node_modules, Rust, Cargo, Python, Gradle, Ruby, pnpm, Bun/tnpm, Flutter                  |
+| `--devtools`          | `-D`  | false   | Clean node_modules, Rust, Cargo, Python, Gradle, Ruby, pnpm, Bun/tnpm, Flutter, package-manager and framework build caches |
 | `--mail`              | `-m`  | false   | Clean old Mail Downloads and recent-item metadata                                               |
 | `--snapshots`         | `-s`  | false   | Remove local Time Machine snapshots                                                             |
 | `--caches`            | `-c`  | false   | Clear user caches/logs, browser caches, container caches, Saved App State, media and IDE caches |

@@ -108,12 +108,91 @@ teardown() {
   [ "$_DEV_VSCODE_TOTAL" -gt 0 ]
 }
 
-@test "devtools::_bun_tnpm: skips if not installed" {
-  if command -v bun &>/dev/null; then skip "bun is installed natively"; fi
-  
+@test "devtools::_bun_tnpm: cleans a leftover cache even when bun is not installed" {
+  mkdir -p "$HOME/.bun/install/cache"
+  dd if=/dev/zero of="$HOME/.bun/install/cache/pkg" bs=1024 count=4 2>/dev/null
+
   _DEV_BUNTNPM_TOTAL=0
   devtools::_bun_tnpm >/dev/null 2>&1
-  [ "$_DEV_BUNTNPM_TOTAL" -eq 0 ]
+  [ "$_DEV_BUNTNPM_TOTAL" -gt 0 ]
+}
+
+# ── Framework build caches ───────────────────────────────────────────────────
+# `.next/dev` and friends only exist to speed up the next build. Age-gating
+# them (the --purge-stale rule for real build output) meant an actively
+# developed project kept a cache that grows without bound.
+
+@test "devtools::_framework_caches: cleans .next/dev in an active project" {
+  mkdir -p "$HOME/Developer/active/.next/dev/cache"
+  echo '{"name":"active"}' > "$HOME/Developer/active/package.json"
+  dd if=/dev/zero of="$HOME/Developer/active/.next/dev/cache/blob" bs=1024 count=8 2>/dev/null
+
+  _DEV_FRAMEWORK_TOTAL=0
+  devtools::_framework_caches >/dev/null 2>&1
+  [ "$_DEV_FRAMEWORK_TOTAL" -gt 0 ]
+}
+
+@test "devtools::_framework_caches: leaves the real .next build output alone" {
+  mkdir -p "$HOME/Developer/active/.next/server"
+  echo '{"name":"active"}' > "$HOME/Developer/active/package.json"
+  dd if=/dev/zero of="$HOME/Developer/active/.next/server/chunk.js" bs=1024 count=8 2>/dev/null
+
+  _DEV_FRAMEWORK_TOTAL=0
+  devtools::_framework_caches >/dev/null 2>&1
+  [ "$_DEV_FRAMEWORK_TOTAL" -eq 0 ]
+}
+
+@test "devtools::_framework_caches: ignores a cache dir outside any project" {
+  mkdir -p "$HOME/Developer/loose/.vite"
+  dd if=/dev/zero of="$HOME/Developer/loose/.vite/blob" bs=1024 count=4 2>/dev/null
+
+  _DEV_FRAMEWORK_TOTAL=0
+  devtools::_framework_caches >/dev/null 2>&1
+  [ "$_DEV_FRAMEWORK_TOTAL" -eq 0 ]
+}
+
+@test "devtools::_framework_caches: largest first, with tiny caches rolled into one line" {
+  local proj="$HOME/Developer/active"
+  mkdir -p "$proj/.next/dev/cache" "$proj/packages/pkg/.turbo"
+  echo '{"name":"active"}' > "$proj/package.json"
+  dd if=/dev/zero of="$proj/.next/dev/cache/blob" bs=1024 count=2048 2>/dev/null
+  dd if=/dev/zero of="$proj/packages/pkg/.turbo/blob" bs=1024 count=4 2>/dev/null
+
+  # Direct call, output to a file: a command substitution would run the module
+  # in a subshell and discard the total it records.
+  local out
+  devtools::_framework_caches > "$TEST_TMP/out.txt" 2>&1
+  out="$(cat "$TEST_TMP/out.txt")"
+
+  # The one cache that matters is named; the 4 KB one is counted, not listed.
+  [[ "$out" == *".next/dev"* ]]
+  [[ "$out" != *"packages/pkg/.turbo"* ]]
+  [[ "$out" == *"1 smaller build caches"* ]]
+  # Both are still counted toward what --devtools can reclaim.
+  [ "$_DEV_FRAMEWORK_TOTAL" -gt 2000000 ]
+}
+
+# ── Package-manager caches ───────────────────────────────────────────────────
+
+@test "devtools::_tool_caches: cleans uv, pip and corepack caches" {
+  mkdir -p "$HOME/.cache/uv" "$HOME/Library/Caches/pip" "$HOME/Library/Caches/node/corepack"
+  dd if=/dev/zero of="$HOME/.cache/uv/blob" bs=1024 count=4 2>/dev/null
+  dd if=/dev/zero of="$HOME/Library/Caches/pip/blob" bs=1024 count=4 2>/dev/null
+  dd if=/dev/zero of="$HOME/Library/Caches/node/corepack/blob" bs=1024 count=4 2>/dev/null
+
+  _DEV_TOOLCACHE_TOTAL=0
+  devtools::_tool_caches >/dev/null 2>&1
+  [ "$_DEV_TOOLCACHE_TOTAL" -gt 0 ]
+}
+
+@test "devtools::_tool_caches: leaves installed mise versions alone" {
+  mkdir -p "$HOME/.local/share/mise/installs/node/22/bin"
+  dd if=/dev/zero of="$HOME/.local/share/mise/installs/node/22/bin/node" bs=1024 count=4 2>/dev/null
+
+  _DEV_TOOLCACHE_TOTAL=0
+  devtools::_tool_caches >/dev/null 2>&1
+  [ "$_DEV_TOOLCACHE_TOTAL" -eq 0 ]
+  [ -f "$HOME/.local/share/mise/installs/node/22/bin/node" ]
 }
 
 @test "devtools::clean: registers module properly" {

@@ -7,6 +7,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.8.0] - 2026-10-20
+
+The parity release. A side-by-side run against Mole reclaimed roughly 4 GB that `--all` had left
+behind: framework dev caches in actively developed projects, and package-manager caches for
+toolchains the scanner never looked at. Two reporting defects from the same runs — a Trash that
+blamed locked files for what was a Full Disk Access denial, and fifty identical `var/folders`
+warnings — are fixed here too.
+
+### Added
+
+- **Framework build caches are cleaned without waiting for the project to go stale.** `.next/dev`,
+  `.next/cache`, `.turbo`, `.vite`, `.parcel-cache`, `.angular/cache` and `.expo/web/cache` exist
+  only to speed up the next build and regrow on demand, so `--devtools` no longer age-gates them.
+  On the reporting machine this found 1.9 GB across active projects, including one 768 MB
+  `.next/dev` that every previous run had skipped as "project is active". Real build output
+  (`.next`, `dist`, `build`, `node_modules`, `target`, `.dart_tool`) still requires `--purge-stale`.
+- Package-manager caches: uv, pip, conda (`pkgs` — environments hardlink into it, so removing the
+  cache does not touch an environment), mise downloads, corepack, GitHub CLI, yarn and deno. Installed
+  mise versions live under `installs/` and are never touched.
+- Bun's cache is cleaned even when the `bun` binary is not on `PATH`. A removed or version-managed
+  toolchain leaves its cache on disk, and the old `command -v bun` gate made those bytes unreachable.
+
+### Fixed
+
+- **A Trash that survives emptying now names the real cause.** Without Full Disk Access, macOS
+  returns EPERM to the owner of `~/.Trash`, so Finder's delete can succeed while the direct fallback
+  cannot. The old message said "check for locked files or Finder permissions", which sent users
+  looking for a lock that did not exist; it now says Full Disk Access, points at the settings pane
+  and adds the same item to the decision block. The same hint appears when the Trash cannot be
+  counted at all.
+- **`var/folders` no longer prints one identical warning per open container.** A single run produced
+  fifty copies of `Skipped: var/folders temp (TemporaryItems) (deletion failed/in use)`. `safe_rm`'s
+  `silent` option now suppresses the failure warning as well as the success row, and the sweep
+  reports one line with the count instead.
+- Bun, tnpm and the new tool-cache paths add `SAFE_RM_LAST_BYTES` rather than their own `du` result,
+  so a protected or whitelisted path can no longer inflate a module's scanned total.
+
+### Changed
+
+- **Output is grouped and ranked instead of walked in directory order.** Category headers, module
+  headers and item rows now share one visual hierarchy, findings are listed largest-first, and
+  build caches under 1 MB collapse into a single line (`67 smaller build caches`) rather than
+  burying the one 768 MB entry. `--verbose` still lists every path, and every path is in the
+  operation log.
+- **A muted 256-colour palette** replaces the saturated ANSI set, so the same run reads on light and
+  dark terminals, with the usual controls: `NO_COLOR=1` and `MAC_CLEANUP_COLOR=0` both force
+  plain text. Colour still turns itself off for pipes and redirects. The summary bar gained a dim
+  track, so its column reads as a scale.
+- A `printf` format/argument mismatch in the module header, which printed a stray blank line and a
+  three-space line before every module's first message, is gone.
+
 ## [v0.7.0] - 2026-10-17
 
 The system-store release. Apple's Content Caching store — the copy of software updates and iCloud
