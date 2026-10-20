@@ -52,17 +52,23 @@ _timed() {
 }
 
 @test "cli: --version prints version and exits" {
+  local expected
+  expected="$(grep -m1 '^VERSION=' "$PROJECT_ROOT/lib/core/core.sh" | cut -d'"' -f2)"
+
   run "$PROJECT_ROOT/bin/mac-cleanup" --version
 
   [ "$status" -eq 0 ]
-  [ "$output" = "mac-cleanup v0.7.0" ]
+  [ "$output" = "mac-cleanup v${expected}" ]
 }
 
 @test "cli: -V prints version and exits" {
+  local expected
+  expected="$(grep -m1 '^VERSION=' "$PROJECT_ROOT/lib/core/core.sh" | cut -d'"' -f2)"
+
   run "$PROJECT_ROOT/bin/mac-cleanup" -V
 
   [ "$status" -eq 0 ]
-  [ "$output" = "mac-cleanup v0.7.0" ]
+  [ "$output" = "mac-cleanup v${expected}" ]
 }
 # ── Target gating ─────────────────────────────────────────────────────────────
 # system::clean and orphans::clean used to run above the gating, so any target

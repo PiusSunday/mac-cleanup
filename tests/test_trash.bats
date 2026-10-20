@@ -170,6 +170,29 @@ teardown() {
   [[ "$output" == *"remain after emptying"* ]]
 }
 
+@test "trash: items that survive emptying without Full Disk Access say what to fix" {
+  mkdir -p "$HOME/.Trash"
+  echo x > "$HOME/.Trash/stuck"
+  _osascript_timed() { return 0; }        # Finder "succeeds" and removes nothing
+  system::_trash_count() { echo 3; }
+  system::_trash_readable() { return 1; } # TCC denies the direct fallback
+  EMPTY_TRASH=true
+  SKIP_CONFIRM=true
+  TOTAL_FREED=0
+  ACTION_LABELS=(); ACTION_BYTES=(); ACTION_COMMANDS=()
+
+  # Not `run`: it executes in a subshell, so the action arrays it fills would be
+  # lost before the assertions below.
+  system::_trash > "$TEST_DIR/out.txt" 2>&1 || true
+  local out
+  out="$(cat "$TEST_DIR/out.txt")"
+
+  [[ "$out" == *"Full Disk Access"* ]]
+  [[ "$out" != *"check for locked files"* ]]
+  [ "${#ACTION_LABELS[@]}" -eq 1 ]
+  [[ "${ACTION_COMMANDS[0]}" == *"Privacy_AllFiles"* ]]
+}
+
 @test "trash: --empty-trash on a verifiable Trash reports success" {
   mkdir -p "$HOME/.Trash"
   echo x > "$HOME/.Trash/a"

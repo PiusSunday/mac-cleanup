@@ -314,6 +314,10 @@ _safe_rm_check_system_path() {
 # keeps the report's Found column equal to Reclaimable.
 SAFE_RM_LAST_BYTES=0
 
+# true when the most recent safe_rm attempted a delete and it failed. Silent
+# sweeps read this instead of a warning line to aggregate their own summary.
+SAFE_RM_FAILED=false
+
 # Counters surfaced in the summary report.
 TOTAL_PROTECTED=0
 TOTAL_PROTECTED_BYTES=0
@@ -332,6 +336,7 @@ safe_rm() {
   local use_silent=false
 
   SAFE_RM_LAST_BYTES=0
+  SAFE_RM_FAILED=false
 
   if [[ "$options" == *"force"* ]]; then
     use_force=true
@@ -437,12 +442,22 @@ safe_rm() {
     return 0
   fi
 
+  # `silent` suppresses the success row *and* the failure warning. A sweep that
+  # walks dozens of same-named targets (var/folders) aggregates its own skips;
+  # leaving the warning on printed the identical line once per target, which is
+  # how a single run produced fifty copies of "Skipped: var/folders temp".
+  local failed_note=""
+  if [[ "$use_silent" != "true" ]]; then
+    failed_note="${label} (deletion failed/in use)"
+  fi
+
   if [[ "$use_sudo" == "true" ]]; then
     sudo rm -rf -- "$resolved" 2>/dev/null || {
       log::verbose "safe_rm: deletion failed: $resolved"
       _oplog "SKIPPED" "$resolved" "delete-failed"
-      if [[ "$DRY_RUN" != "true" ]]; then
-        log::warn "Skipped: ${label} (deletion failed/in use)"
+      SAFE_RM_FAILED=true
+      if [[ "$DRY_RUN" != "true" && -n "$failed_note" ]]; then
+        log::warn "Skipped: ${failed_note}"
       fi
       return 0
     }
@@ -450,8 +465,9 @@ safe_rm() {
     rm -rf -- "$resolved" 2>/dev/null || {
       log::verbose "safe_rm: deletion failed: $resolved"
       _oplog "SKIPPED" "$resolved" "delete-failed"
-      if [[ "$DRY_RUN" != "true" ]]; then
-        log::warn "Skipped: ${label} (deletion failed/in use)"
+      SAFE_RM_FAILED=true
+      if [[ "$DRY_RUN" != "true" && -n "$failed_note" ]]; then
+        log::warn "Skipped: ${failed_note}"
       fi
       return 0
     }

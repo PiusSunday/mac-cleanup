@@ -205,6 +205,38 @@ setup() {
   [ "$_SYS_VARFOLDERS_TOTAL" -gt 0 ]
 }
 
+@test "system::_var_folders: an in-use target is reported once, not once per container" {
+  source "${BATS_TEST_DIRNAME}/../lib/core/protect.sh"
+  protect::claim_reset
+
+  mkdir -p "${BATS_TEST_TMPDIR}/fake_user_tmp"
+  getconf() { echo "${BATS_TEST_TMPDIR}/fake_user_tmp"; }
+  export -f getconf
+
+  local a="${BATS_TEST_TMPDIR}/fake_var_folders/A/T/TemporaryItems"
+  local b="${BATS_TEST_TMPDIR}/fake_var_folders/B/T/TemporaryItems"
+  mkdir -p "$a" "$b"
+  echo x > "$a/file"
+  echo x > "$b/file"
+
+  # Two containers, both held open by their app: the delete fails for each.
+  find() { printf '%s\n' "$a" "$b"; }
+  export -f find
+  rm() { return 1; }
+  export -f rm
+
+  DRY_RUN=false
+  _SYS_VARFOLDERS_TOTAL=0
+  run system::_var_folders
+  DRY_RUN=true
+
+  unset -f getconf find rm
+
+  [ "$_SYS_VARFOLDERS_TOTAL" -eq 0 ]
+  [[ "$output" == *"2 items in use"* ]]
+  [ "$(grep -c 'in use' <<< "$output")" -eq 1 ]
+}
+
 # ── Trash gating ──────────────────────────────────────────────────────────────
 # The Trash holds files the user chose to delete but has not committed to
 # losing. Until v0.5.0 system::_trash emptied it as part of an ordinary cache
