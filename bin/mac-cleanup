@@ -58,7 +58,17 @@ show_help() {
 ${BOLD}mac-cleanup v${VERSION}${RESET} — macOS Developer Storage Cleanup
 
 ${BOLD}USAGE:${RESET}
-  mac-cleanup [targets] [options]
+  mac-cleanup [clean|scan] [targets] [options]
+
+${BOLD}COMMANDS:${RESET}
+  clean              Clean the selected targets now, no prompts. Default: all
+  scan               Preview the selected targets. Default: all
+  help               Show this help
+  version            Print the version
+
+  The verbs only choose the mode, so flags still apply:
+  mac-cleanup clean --devtools   cleans developer artifacts only
+  mac-cleanup scan --system      previews the system module only
 
 ${BOLD}TARGETS:${RESET}
   --system, -S       Scan crash reports, .DS_Store, Trash, dev caches
@@ -93,6 +103,9 @@ ${BOLD}OPTIONS:${RESET}
   --help, -h         Show this help
 
 ${BOLD}EXAMPLES:${RESET}
+  mac-cleanup scan                  Preview everything (same as --all --dry-run)
+  mac-cleanup clean                 Clean everything, no prompts (same as --all --yes)
+  mac-cleanup clean --devtools      Clean developer artifacts only
   mac-cleanup --all                 Preview all cleanups (dry-run by default)
   mac-cleanup --all --yes           Clean everything, no prompts (live mode)
   mac-cleanup --xcode --docker      Preview Xcode + Docker cleanup
@@ -105,7 +118,7 @@ ${BOLD}EXAMPLES:${RESET}
   mac-cleanup --purge-stale         Remove build artifacts from dormant projects
   mac-cleanup --version             Show the current version
 
-${YELLOW}${WARN}  Running mac-cleanup without cleanup targets defaults to a safe --all --dry-run preview.${RESET}
+${YELLOW}${WARN}  Running mac-cleanup without targets or a verb defaults to a safe --all --dry-run preview.${RESET}
    If you pass cleanup targets without --dry-run, you will be prompted before
    any live deletion unless --yes is also passed.
 
@@ -146,10 +159,39 @@ has_cleanup_target() {
 
 # ── Flag parsing ──────────────────────────────────────────────────────────────
 parse_flags() {
+  # ── Verb form ──
+  # `mac-cleanup clean` is the live cleanup; `mac-cleanup scan` is the preview.
+  # A verb only chooses the mode, so every flag still works after it:
+  # `mac-cleanup clean --devtools` cleans developer artifacts only.
+  local verb=""
+  case "${1:-}" in
+    clean|scan|help|version)
+      verb="$1"
+      shift
+      ;;
+  esac
+
+  case "$verb" in
+    help)
+      show_help
+      exit 0
+      ;;
+    version)
+      show_version
+      exit 0
+      ;;
+  esac
+
   if [[ $# -eq 0 ]]; then
-    DRY_RUN=true
     set_default_targets
-    log::warn "No flags provided. Running --all --dry-run by default."
+    if [[ "$verb" == "clean" ]]; then
+      DRY_RUN=false
+      SKIP_CONFIRM=true
+    else
+      DRY_RUN=true
+      [[ "$verb" == "scan" ]] \
+        || log::warn "No flags provided. Running --all --dry-run by default. 'mac-cleanup clean' cleans for real."
+    fi
     return
   fi
 
@@ -285,20 +327,33 @@ parse_flags() {
 
   if ! has_cleanup_target; then
     set_default_targets
-    DRY_RUN=true
-    if [[ "$SKIP_CONFIRM" == "true" ]] && [[ "$explicit_dry_run" != "true" ]]; then
-      log::warn "No cleanup target selected. Ignoring --yes and running --all --dry-run by default."
+    if [[ "$verb" == "clean" ]]; then
+      # `clean` with no target means "clean everything", the way `brew cleanup`
+      # does — not "preview everything, then ask".
+      if [[ "$explicit_dry_run" == "true" ]]; then
+        DRY_RUN=true
+      else
+        DRY_RUN=false
+        SKIP_CONFIRM=true
+      fi
     else
-      log::warn "No cleanup target selected. Running --all --dry-run by default."
+      DRY_RUN=true
+      if [[ -z "$verb" ]]; then
+        if [[ "$SKIP_CONFIRM" == "true" ]] && [[ "$explicit_dry_run" != "true" ]]; then
+          log::warn "No cleanup target selected. Ignoring --yes and running --all --dry-run by default."
+        else
+          log::warn "No cleanup target selected. Running --all --dry-run by default."
+        fi
+      fi
     fi
     return
   fi
 
-  if [[ "$explicit_dry_run" == "true" ]]; then
+  if [[ "$explicit_dry_run" == "true" ]] || [[ "$verb" == "scan" ]]; then
     # Explicit --dry-run — nothing to prompt
     DRY_RUN=true
-  elif [[ "$SKIP_CONFIRM" == "true" ]]; then
-    # --yes without --dry-run — proceed with live cleanup silently
+  elif [[ "$verb" == "clean" ]] || [[ "$SKIP_CONFIRM" == "true" ]]; then
+    # `clean`, or --yes without --dry-run — proceed with live cleanup silently
     DRY_RUN=false
   else
     # Interactive: warn and prompt

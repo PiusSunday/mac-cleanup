@@ -182,9 +182,25 @@ bats tests/
 
 ## Usage
 
+Two verbs cover the common cases; the flags below still work exactly as before.
+
+| Command | What it does |
+| --- | --- |
+| `mac-cleanup scan` | Preview every target (same as `--all --dry-run`) |
+| `mac-cleanup clean` | Clean every target now, no prompts (same as `--all --yes`) |
+| `mac-cleanup clean --devtools` | Clean developer artifacts only |
+| `mac-cleanup scan --system` | Preview the system module only |
+| `mac-cleanup help` / `version` | Help / version |
+
 ```bash
 # Preview all cleanups — safe to run anytime (Implies --all --dry-run)
 mac-cleanup
+
+# Two-word forms
+mac-cleanup scan                  # preview everything
+mac-cleanup clean                 # clean everything, no prompts
+mac-cleanup clean --devtools      # clean developer artifacts only
+mac-cleanup scan --xcode --docker # preview two targets
 
 # Preview specific targets
 mac-cleanup --all --dry-run
@@ -197,7 +213,7 @@ mac-cleanup --all
 mac-cleanup --all --yes
 
 # Show help
-mac-cleanup --help
+mac-cleanup help
 
 # Deep system cleanup only
 mac-cleanup --system-deep --yes

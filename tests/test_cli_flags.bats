@@ -51,6 +51,80 @@ _timed() {
   [ "$output" = "true|true|true" ]
 }
 
+@test "parse_flags: clean runs every target live, without prompts" {
+  run bash -c '
+    source "$1/bin/mac-cleanup"
+    parse_flags clean >/dev/null 2>&1
+    printf "%s|%s|%s|%s|%s\n" \
+      "$DRY_RUN" "$SKIP_CONFIRM" "$TARGET_SYSTEM" "$TARGET_DEVTOOLS" "$TARGET_OPTIMIZE"
+  ' _ "$PROJECT_ROOT"
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "false|true|true|true|false" ]
+}
+
+@test "parse_flags: scan previews every target" {
+  run bash -c '
+    source "$1/bin/mac-cleanup"
+    parse_flags scan >/dev/null 2>&1
+    printf "%s|%s|%s|%s\n" "$DRY_RUN" "$SKIP_CONFIRM" "$TARGET_SYSTEM" "$TARGET_XCODE"
+  ' _ "$PROJECT_ROOT"
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "true|false|true|true" ]
+}
+
+@test "parse_flags: clean --devtools cleans only that target" {
+  run bash -c '
+    source "$1/bin/mac-cleanup"
+    parse_flags clean --devtools >/dev/null 2>&1
+    printf "%s|%s|%s|%s\n" "$DRY_RUN" "$TARGET_DEVTOOLS" "$TARGET_XCODE" "$TARGET_SYSTEM"
+  ' _ "$PROJECT_ROOT"
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "false|true|false|false" ]
+}
+
+@test "parse_flags: clean --dry-run stays a preview" {
+  run bash -c '
+    source "$1/bin/mac-cleanup"
+    parse_flags clean --dry-run >/dev/null 2>&1
+    printf "%s|%s\n" "$DRY_RUN" "$TARGET_SYSTEM"
+  ' _ "$PROJECT_ROOT"
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "true|true" ]
+}
+
+@test "parse_flags: scan --yes still previews" {
+  run bash -c '
+    source "$1/bin/mac-cleanup"
+    parse_flags scan --yes >/dev/null 2>&1
+    printf "%s|%s\n" "$DRY_RUN" "$TARGET_SYSTEM"
+  ' _ "$PROJECT_ROOT"
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "true|true" ]
+}
+
+@test "cli: the version verb prints the version" {
+  local expected
+  expected="$(grep -m1 '^VERSION=' "$PROJECT_ROOT/lib/core/core.sh" | cut -d'"' -f2)"
+
+  run "$PROJECT_ROOT/bin/mac-cleanup" version
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "mac-cleanup v${expected}" ]
+}
+
+@test "cli: the help verb prints usage" {
+  run "$PROJECT_ROOT/bin/mac-cleanup" help
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"COMMANDS:"* ]]
+  [[ "$output" == *"mac-cleanup clean"* ]]
+}
+
 @test "cli: --version prints version and exits" {
   local expected
   expected="$(grep -m1 '^VERSION=' "$PROJECT_ROOT/lib/core/core.sh" | cut -d'"' -f2)"

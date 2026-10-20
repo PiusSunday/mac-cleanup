@@ -234,7 +234,11 @@ utils::get_size_bytes() {
   out=$(utils::run_timed "${MAC_CLEANUP_DU_TIMEOUT:-20}" du -skPx "$path" 2>/dev/null)
   local size="${out%%[[:space:]]*}"
   if [[ ! "$size" =~ ^[0-9]+$ ]]; then
-    log::verbose "size probe timed out or failed: ${path}"
+    # stdout is this function's return channel — every caller reads the size as
+    # `bytes=$(utils::get_size_bytes ...)`. A diagnostic printed here used to be
+    # captured as part of the value ("size probe timed out...\n0"), which then
+    # crashed the caller's arithmetic under --verbose.
+    log::verbose "size probe timed out or failed: ${path}" >&2
     echo 0
     return 0
   fi
@@ -438,6 +442,8 @@ safe_rm() {
   else
     bytes=$(utils::get_size_bytes "$resolved")
   fi
+  # Never let a non-numeric probe result reach the accumulators below.
+  [[ "$bytes" =~ ^[0-9]+$ ]] || bytes=0
   local bytes_fmt
   bytes_fmt=$(utils::format_bytes "$bytes")
 
