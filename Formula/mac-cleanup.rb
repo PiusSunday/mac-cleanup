@@ -5,8 +5,8 @@ class MacCleanup < Formula
   # They pin the immutable tarball attached to that GitHub release, not GitHub's
   # generated archive (whose bytes change if history is ever rewritten). The
   # values below deliberately mirror the latest published release.
-  url "https://github.com/PiusSunday/mac-cleanup/releases/download/v0.8.0/mac-cleanup-0.8.0.tar.gz"
-  sha256 "d44a4dc992ac08dc376a4cb1879743063915b00161e9847890d52dcc50f470dd"
+  url "https://github.com/PiusSunday/mac-cleanup/releases/download/v0.9.0/mac-cleanup-0.9.0.tar.gz"
+  sha256 "85f81c574780dc1f64d123a8c7108870f9629d3d9be1f5ef643e865470123d37"
   license "MIT"
   head "https://github.com/PiusSunday/mac-cleanup.git", branch: "main"
 
