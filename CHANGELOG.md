@@ -7,6 +7,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.9.0] - 2026-10-20
+
+The short-command release. The common case is now two words instead of four, and a
+`--verbose` crash on unreadable paths is fixed.
+
+### Added
+
+- **`mac-cleanup clean` cleans every target live, with no prompts** — the same thing
+  `--all --yes` did, without remembering either flag. `mac-cleanup scan` is the preview.
+  The verbs only choose the mode, so flags still compose: `clean --devtools` cleans
+  developer artifacts only, `scan --system` previews one module, and `clean --dry-run`
+  stays a preview.
+- `mac-cleanup help` and `mac-cleanup version` as words, alongside `--help` and `--version`.
+
+### Fixed
+
+- **`--verbose` no longer crashes the run on an unreadable path.** `utils::get_size_bytes`
+  printed its "size probe timed out or failed" diagnostic to stdout — which is that
+  function's return channel — so `bytes=$(get_size_bytes ...)` came back as the diagnostic
+  followed by `0`, and the caller's arithmetic aborted with
+  `syntax error: operand expected`. Any TCC-protected directory (a `TemporaryItems`
+  container, for example) could trigger it. The diagnostic now goes to stderr, and the
+  caller discards a non-numeric result instead of trusting it.
+- `.DS_Store: 1 files` now reads `1 file`.
+
 ## [v0.8.0] - 2026-10-20
 
 The parity release. A side-by-side run against Mole reclaimed roughly 4 GB that `--all` had left

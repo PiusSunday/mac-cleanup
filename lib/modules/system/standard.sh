@@ -155,7 +155,9 @@ system::_ds_store() {
       local deleted=$(( count - skipped ))
       msg=".DS_Store: ${deleted} of ${count} files ($(utils::format_bytes "$total_bytes")) — ${skipped} skipped (protected or unwritable)"
     else
-      msg=".DS_Store: ${count} files ($(utils::format_bytes "$total_bytes"))"
+      local unit="files"
+      (( count == 1 )) && unit="file"
+      msg=".DS_Store: ${count} ${unit} ($(utils::format_bytes "$total_bytes"))"
     fi
     log::info "$msg"
   else

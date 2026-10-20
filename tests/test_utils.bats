@@ -131,6 +131,21 @@ teardown() {
 
 # ── utils::confirm ────────────────────────────────────────────────────────────
 
+@test "get_size_bytes: verbose diagnostics never leak into the returned size" {
+  # stdout is the return channel: callers read `bytes=$(get_size_bytes ...)`. The
+  # diagnostic used to be printed there, so under --verbose the value became
+  # "size probe timed out or failed: ...\n0" and the caller's arithmetic crashed.
+  local locked="$BATS_TEST_TMPDIR/locked"
+  mkdir -p "$locked"
+  chmod 000 "$locked"
+
+  local out
+  out="$(VERBOSE=true utils::get_size_bytes "$locked" 2>/dev/null)"
+  chmod 755 "$locked"
+
+  [ "$out" = "0" ]
+}
+
 @test "utils::confirm: returns 0 immediately when SKIP_CONFIRM=true in live mode" {
   DRY_RUN=false
   SKIP_CONFIRM=true
